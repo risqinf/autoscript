@@ -1,0 +1,36 @@
+[Unit]
+Description=Autoscript VPN API Server
+Documentation=https://github.com/risqinf/autoscript
+After=network.target xray.service
+
+[Service]
+Type=simple
+User=root
+ExecStart=/usr/local/bin/api-server
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=30
+
+# Environment
+Environment=API_LISTEN=127.0.0.1:9000
+Environment=API_DB_PATH=/etc/api/api.db
+Environment=MAIN_DB_PATH=/etc/xray/xray.db
+
+# Performance
+LimitNOFILE=1000000
+LimitNPROC=10000
+
+# Security & Sandboxing
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=full
+ProtectHome=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictNamespaces=yes
+RestrictSUIDSGID=yes
+ReadWritePaths=/etc/api /etc/xray /var/log /tmp
+
+[Install]
+WantedBy=multi-user.target

@@ -1228,57 +1228,101 @@ for svc in quota limit-ip-vless quota-trojan limit-ip-trojan quota-vmess limit-i
 done
 
 # Api Server
-# NOTE: The RESTful API server is being rebuilt from scratch and is not yet
-# available. This sets up the directory and systemd unit, but the server
-# binary is intentionally not installed or enabled here.
 api_server_install_logic() {
+    print_info "Building and installing API server..."
+
+    # Check if Go is installed
+    if ! command -v go &>/dev/null; then
+        print_info "Installing Go..."
+        dnf install -y golang >/dev/null 2>&1
+    fi
+
+    # Build API server
+    API_DIR="$(dirname "$0")/files"
+    if [[ ! -d "$API_DIR" ]]; then
+        print_error "API source directory not found: $API_DIR"
+        return 1
+    fi
+
+    # Detect system resources for resource-limited compilation
+    local cpu_cores=$(nproc 2>/dev/null || echo 1)
+    local ram_mb=$(awk '/MemTotal/ {print int($2/1024)}' /proc/meminfo 2>/dev/null || echo 1024)
+
+    # Calculate build limits based on available resources
+    local gomaxprocs gogc build_parallel
+    if (( ram_mb <= 512 )); then
+        gomaxprocs=1; gogc=30; build_parallel=1
+        print_info "Low RAM (${ram_mb}MB): minimal build settings"
+    elif (( ram_mb <= 1024 )); then
+        gomaxprocs=1; gogc=50; build_parallel=1
+        print_info "Standard RAM (${ram_mb}MB): balanced build settings"
+    elif (( ram_mb <= 2048 )); then
+        gomaxprocs=$((cpu_cores > 2 ? 2 : cpu_cores)); gogc=75; build_parallel=2
+        print_info "Good RAM (${ram_mb}MB): faster build settings"
+    else
+        gomaxprocs=$cpu_cores; gogc=100; build_parallel=$cpu_cores
+        print_info "High RAM (${ram_mb}MB): maximum build settings"
+    fi
+
+    # Check swap
+    local swap_mb=$(free -m | awk '/Swap/ {print $2}' 2>/dev/null || echo 0)
+    (( swap_mb > 0 )) && print_info "Swap available: ${swap_mb}MB"
+
+    cd "$API_DIR"
+    print_info "Downloading Go dependencies..."
+    go mod tidy >/dev/null 2>&1
+
+    print_info "Compiling API server (GOMAXPROCS=$gomaxprocs, GOGC=$gogc, -p $build_parallel)..."
+    export GOMAXPROCS=$gomaxprocs
+    export GOGC=$gogc
+
+    CGO_ENABLED=0 go build \
+        -p $build_parallel \
+        -ldflags="-s -w" \
+        -o /usr/local/bin/api-server \
+        ./cmd/server
+
+    if [[ ! -f "/usr/local/bin/api-server" ]]; then
+        print_error "API server build failed!"
+        print_error "If OOM, add swap: fallocate -l 1G /swapfile && chmod 600 /swapfile && mkswap /swapfile && swapon /swapfile"
+        return 1
+    fi
+    chmod +x /usr/local/bin/api-server
+    print_ok "API server binary installed"
+
+    # Create API database directory
     mkdir -p /etc/api
-    mkdir -p /usr/local/sbin/api
+    chmod 700 /etc/api
 
-    # Configure WebAPI Server Service (disabled until the server is rebuilt)
-    cat > /etc/systemd/system/server.service <<EOF
-[Unit]
-Description=WebAPI Server Proxy by risqinf
-Documentation=https://github.com/risqinf/autoscript
-After=syslog.target network-online.target
-
-[Service]
-Type=simple
-User=root
-WorkingDirectory=/usr/local/sbin/api
-ExecStart=/usr/local/bin/server
-Restart=on-failure
-RestartPreventExitStatus=23
-RestartSec=5
-TimeoutStopSec=30
-KillSignal=SIGTERM
-
-# Performance Tuning
-LimitNPROC=10000
-LimitNOFILE=1000000
-
-# Security & Sandboxing
-NoNewPrivileges=yes
-PrivateTmp=yes
-ProtectSystem=full
-ProtectHome=yes
-ProtectKernelTunables=yes
-ProtectKernelModules=yes
-ProtectControlGroups=yes
-ReadWritePaths=/var/log /usr/local/sbin/api /etc/api /etc/xray /tmp /var/tmp
-
-[Install]
-WantedBy=multi-user.target
-EOF
-
+    # Install systemd service
+    cp "$API_DIR/api-server.service" /etc/systemd/system/api-server.service
+    chmod 644 /etc/systemd/system/api-server.service
     systemctl daemon-reload
-    print_warn "WebAPI server binary not installed (to be rebuilt). Service unit prepared but not started."
+
+    # Enable and start service
+    systemctl enable api-server --now >/dev/null 2>&1
+    sleep 2
+
+    if systemctl is-active --quiet api-server; then
+        print_ok "API server is running on 127.0.0.1:9000"
+
+        # Get the default token
+        TOKEN=$(journalctl -u api-server --no-pager -n 50 | grep "default API token created" | tail -1 | awk -F': ' '{print $NF}')
+        if [[ -n "$TOKEN" ]]; then
+            echo ""
+            echo -e "${GREEN}=== API SERVER TOKEN ===${NC}"
+            echo -e "${BLUE}Token:${NC} $TOKEN"
+            echo ""
+            print_info "Save this token for API requests"
+        fi
+    else
+        print_warn "API server failed to start. Check: journalctl -u api-server"
+    fi
 }
 
-if [[ -f "/usr/local/bin/server" ]]; then
-    echo -e "\e[32m[SKIP]\e[0m WebAPI Server is already installed."
-    echo -e "1) Skip"
-    echo -e "2) Reinstall"
+if [[ -f "/usr/local/bin/api-server" ]]; then
+    print_warn "API server is already installed."
+    echo -e "1) Skip\n2) Rebuild"
     read -p "Select [1-2]: " api_choice
     [[ "$api_choice" == "2" ]] && api_server_install_logic
 else

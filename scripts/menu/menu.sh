@@ -144,11 +144,12 @@ tro=$(db_query "SELECT COUNT(*) FROM accounts WHERE protocol='trojan' AND status
 
 # --- SERVICE STATUS (uses shared badges from common.sh) ---
 # SSH tunnel = dropbear + ssh-ws together (3-state: ON/WARN/OFF).
-ressshws=$(ssh_stack_badge)
+resshws=$(ssh_stack_badge)
 resngx=$(svc_badge nginx)
 resv2r=$(svc_badge xray)
 reshap=$(svc_badge haproxy)
 resovpn=$(svc_badge openvpn-server@server-tcp-1194)
+resapi=$(svc_badge api-server)
 
 # --- SYSTEM INFO ---
 DOMAIN=$(cat /etc/xray/domain 2>/dev/null || echo "Not Set")
@@ -179,11 +180,12 @@ ui_rule
 printf " ${WHITE}%-12s${NC} ${CYAN}:${NC} SSH ${GREEN}%s${NC}   VLESS ${GREEN}%s${NC}   VMESS ${GREEN}%s${NC}   TROJAN ${GREEN}%s${NC}\n" "Accounts" "$ssh1" "$vls" "$vms" "$tro"
 ui_rule
 ui_label "SERVICES"
-ui_status "SSH + WS"  "$ressshws"
+ui_status "SSH + WS"  "$resshws"
 ui_status "Xray Core" "$resv2r"
 ui_status "Nginx"     "$resngx"
 ui_status "HAProxy"   "$reshap"
 ui_status "OpenVPN"   "$resovpn"
+ui_status "API"       "$resapi"
 ui_rule
 ui_label "ACCOUNT PANELS"
 ui_opt 1 "SSH / OpenVPN Panel"

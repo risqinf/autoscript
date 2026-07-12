@@ -32,7 +32,7 @@ fi
 # ---------------------------------------------------------------------------
 echo "[1/9] Stopping and disabling services..."
 SERVICES=(
-    haproxy xray nginx dropbear ssh-ws server
+    haproxy xray nginx dropbear ssh-ws server api-server
     quota limit-ip-vless quota-trojan limit-ip-trojan quota-vmess limit-ip-vmess
     autoexpire.timer limit-ip-ssh.timer backup.timer fixlog.timer
     openvpn-server@server-tcp-1194
@@ -47,6 +47,7 @@ echo "[2/9] Removing systemd unit files..."
 rm -f /etc/systemd/system/xray.service
 rm -f /etc/systemd/system/ssh-ws.service
 rm -f /etc/systemd/system/server.service
+rm -f /etc/systemd/system/api-server.service
 rm -f /etc/systemd/system/dropbear.service
 rm -f /etc/systemd/system/quota.service
 rm -f /etc/systemd/system/quota-trojan.service
@@ -65,6 +66,7 @@ systemctl daemon-reload
 echo "[3/9] Removing binaries and runtime files..."
 rm -f /usr/local/bin/xray
 rm -f /usr/local/bin/server
+rm -f /usr/local/bin/api-server
 rm -f /usr/local/bin/ssh-ws
 rm -f /var/log/ssh-ws.log
 rm -rf /usr/local/share/xray
