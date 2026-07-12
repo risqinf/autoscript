@@ -42,16 +42,7 @@ if [[ -n "$SECLOG" ]]; then
   )
 fi
 
-# --- 2) live proxy-ports (sockets to dropbear:109) ---
-# Note: avoid relying on `ss -H` (not supported everywhere); the grep on
-# '127.0.0.1:109' already drops the header line.
-declare -A LIVEPORT
-while read -r p; do
-  [[ -n "$p" ]] && LIVEPORT[$p]=1
-done < <(ss -tn 2>/dev/null | grep '127.0.0.1:109' \
-          | grep -oE '127\.0\.0\.1:[0-9]+' | grep -v ':109$' | cut -d: -f2 | sort -u)
-
-# --- 3) ssh-ws.log -> per session: proxyport|clientip|tx|rx|total|up|timestamp ---
+# --- 2) ssh-ws.log -> per session: proxyport|clientip|tx|rx|total|up|timestamp ---
 # Robust parser: strips ANSI color codes and matches [CONNECT]/[MONITOR]
 # anywhere on the line, extracting sessionID / client-IP / proxy-port by
 # pattern instead of fixed field positions. This survives colorized logs
@@ -115,17 +106,17 @@ if [[ -f "$WSLOG" ]]; then
   )
 fi
 
-# --- 4) decide which proxy-ports are ACTIVE right now ---------------------
-# A session is active if it has a live socket to dropbear (ss) OR it has a
-# fresh [MONITOR] heartbeat in ssh-ws.log. The heartbeat check makes the
-# monitor authoritative for liveness and avoids missing sessions when `ss`
-# does not surface the loopback socket.
-LIVE_WINDOW=45   # seconds; monitor emits roughly every ~10s
+# --- 3) decide which proxy-ports are ACTIVE right now ---------------------
+# A session is active if it has a fresh [MONITOR] heartbeat or a recent
+# [CONNECT] entry in ssh-ws.log.  ssh-ws writes MONITOR every ~10s so a
+# 45 s window is safe even if one tick is delayed.
+#
+# ss-detected ports are deliberately NOT added — they include TIME_WAIT
+# sockets from already-closed sessions which would appear as ghost entries
+# with no bandwidth/uptime data.
+LIVE_WINDOW=45   # seconds
 now_epoch=$(date +%s)
 declare -A ACTIVEPORT
-for p in "${!LIVEPORT[@]}"; do
-  ACTIVEPORT[$p]=1
-done
 for pport in "${!S_PORT[@]}"; do
   ts="${S_TS[$pport]}"
   [[ -z "$ts" ]] && continue

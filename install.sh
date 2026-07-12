@@ -310,7 +310,6 @@ firewall-cmd --permanent --zone=public --add-port=443/tcp  >/dev/null 2>&1   # H
 firewall-cmd --permanent --zone=public --add-port=7300/udp >/dev/null 2>&1
 # OpenVPN
 firewall-cmd --permanent --zone=public --add-port=1194/tcp >/dev/null 2>&1   # OpenVPN TCP
-firewall-cmd --permanent --zone=public --add-port=2200/udp >/dev/null 2>&1   # OpenVPN UDP
 
 firewall-cmd --reload >/dev/null 2>&1
 print_success "Firewall locked down (allowlist only)."
@@ -837,6 +836,7 @@ server {
     # nginx resolves the upstream block directly (a variable in proxy_pass would
     # bypass the upstream and require a DNS resolver).
     location /vless {
+        if (\$http_upgrade != "websocket") { return 444; }
         proxy_pass http://vless_ws;
         proxy_http_version 1.1;
         proxy_set_header Upgrade \$http_upgrade;
@@ -849,7 +849,24 @@ server {
         proxy_buffering off;
     }
 
+    # Explicit /vmess path: silently reject scanners. VMESS clients use "/"
+    # (the root-path location below) — not this explicit path.
+    location /vmess {
+        if (\$http_upgrade != "websocket") { return 444; }
+        proxy_pass http://vmess_ws;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade \$http_upgrade;
+        proxy_set_header Connection \$connection_upgrade;
+        proxy_set_header Host \$http_host;
+        proxy_set_header X-Real-IP \$remote_addr;
+        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+        proxy_read_timeout 7d;
+        proxy_send_timeout 7d;
+        proxy_buffering off;
+    }
+
     location /trojan {
+        if (\$http_upgrade != "websocket") { return 444; }
         proxy_pass http://trojan_ws;
         proxy_http_version 1.1;
         proxy_set_header Upgrade \$http_upgrade;
@@ -864,6 +881,7 @@ server {
 
     # Explicit SSH-WS path (always forced to the ssh-ws proxy).
     location /ssh {
+        if (\$http_upgrade != "websocket") { return 444; }
         proxy_pass http://ssh_ws;
         proxy_http_version 1.1;
         proxy_set_header Upgrade \$http_upgrade;
@@ -893,6 +911,7 @@ server {
     # VMESS multipath (any other path) OR SSH-WS, decided by the handshake.
     # Any non-protocol path is rewritten to "/" for the vmess inbound.
     location / {
+        if (\$http_upgrade != "websocket") { return 444; }
         rewrite ^.*\$ / break;
         proxy_pass http://\$root_upstream;
         proxy_http_version 1.1;
@@ -1394,44 +1413,6 @@ ovpn_install_logic() {
     fi
     PLUGIN_PAM="/usr/lib64/openvpn/plugins/openvpn-plugin-auth-pam.so"
 
-    # UDP Server Config
-    cat > /etc/openvpn/server/server-udp-2200.conf <<EOF
-port 2200
-proto udp
-dev tun
-ca ca.crt
-cert server.crt
-key server.key
-dh dh.pem
-tls-auth ta.key 0
-topology subnet
-server 10.8.0.0 255.255.255.0
-push "redirect-gateway def1 bypass-dhcp"
-push "dhcp-option DNS 8.8.8.8"
-push "dhcp-option DNS 1.1.1.1"
-fast-io
-sndbuf 1048576
-rcvbuf 1048576
-push "sndbuf 1048576"
-push "rcvbuf 1048576"
-txqueuelen 2000
-tun-mtu 1360
-mssfix 1320
-keepalive 10 30
-comp-lzo no
-push "comp-lzo no"
-cipher none
-auth none
-data-ciphers none
-plugin $PLUGIN_PAM login
-verify-client-cert none
-username-as-common-name
-persist-key
-persist-tun
-status openvpn-status-udp.log
-verb 3
-EOF
-
     # TCP Server Config
     cat > /etc/openvpn/server/server-tcp-1194.conf <<EOF
 port 1194
@@ -1467,37 +1448,7 @@ EOF
     CA_DATA=$(cat /etc/openvpn/server/ca.crt)
     TA_DATA=$(cat /etc/openvpn/server/ta.key)
 
-    # Client OVPN Generation
-    cat > $WEB_DIR/udp.ovpn <<EOF
-client
-dev tun
-proto udp
-remote $domain 2200
-resolv-retry infinite
-nobind
-persist-key
-persist-tun
-remote-cert-tls server
-key-direction 1
-setenv CLIENT_CERT 0
-setenv FRIENDLY_NAME "OpenVPN UDP"
-fast-io
-tun-mtu 1360
-mssfix 1320
-cipher none
-auth none
-data-ciphers none
-auth-user-pass
-comp-lzo no
-verb 3
-<ca>
-$CA_DATA
-</ca>
-<tls-auth>
-$TA_DATA
-</tls-auth>
-EOF
-
+    # Client OVPN Generation (TCP only)
     cat > $WEB_DIR/tcp.ovpn <<EOF
 client
 dev tun
@@ -1529,16 +1480,12 @@ EOF
     echo 1 > /proc/sys/net/ipv4/ip_forward
     sed -i 's/#net.ipv4.ip_forward=1/net.ipv4.ip_forward=1/g' /etc/sysctl.conf
     sysctl -p
-    firewall-cmd --zone=public --add-port=2200/udp --permanent
     firewall-cmd --zone=public --add-port=1194/tcp --permanent
     firewall-cmd --add-masquerade --permanent
     firewall-cmd --reload
 
-    systemctl enable openvpn-server@server-udp-2200
     systemctl enable openvpn-server@server-tcp-1194
-    systemctl restart openvpn-server@server-udp-2200
     systemctl restart openvpn-server@server-tcp-1194
-    check_service "openvpn-server@server-udp-2200" || print_warn "OpenVPN UDP not active."
     check_service "openvpn-server@server-tcp-1194" || print_warn "OpenVPN TCP not active."
 }
 

@@ -10,7 +10,7 @@ Supports SSH, VLESS, VMESS, Trojan, and OpenVPN with WebSocket (WS), TLS, and HA
 
 - SSH (OpenSSH + Dropbear) with SSH-over-WebSocket (GO-TUNNEL PRO)
 - VLESS, VMESS, Trojan over WebSocket (TLS + non-TLS) via Xray-core
-- OpenVPN (TCP 1194, UDP 2200) with auto-generated, verified certificates
+- OpenVPN (TCP 1194) with auto-generated, verified certificates
 - HAProxy + Nginx front (TLS termination, path/handshake-based WS routing)
 - SQLite-backed account database with soft-delete + recovery and audit log
 - Per-account quota and IP limit (VLESS/VMESS/Trojan); SSH IP limit
@@ -49,7 +49,7 @@ OOM-ing a small VPS.
 | HTTP | 80 | HAProxy → Nginx |
 | HTTPS / TLS | 443 | HAProxy → Nginx → Xray/SSH-WS |
 | BadVPN / UDPGW | 7300/udp | provided by ssh-ws |
-| OpenVPN | 1194/tcp, 2200/udp | |
+| OpenVPN | 1194/tcp | |
 
 Internal-only (bound to `127.0.0.1`, not in the firewall allowlist):
 Xray API `10085`, Nginx `81`/`444`, SSH-WS proxy `8888`, SSH-WS API `8081`,

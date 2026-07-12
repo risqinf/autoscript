@@ -35,7 +35,7 @@ SERVICES=(
     haproxy xray nginx dropbear ssh-ws server
     quota limit-ip-vless quota-trojan limit-ip-trojan quota-vmess limit-ip-vmess
     autoexpire.timer limit-ip-ssh.timer backup.timer fixlog.timer
-    openvpn-server@server-udp-2200 openvpn-server@server-tcp-1194
+    openvpn-server@server-tcp-1194
 )
 for svc in "${SERVICES[@]}"; do
     systemctl stop "$svc" 2>/dev/null
@@ -166,7 +166,7 @@ echo "[9/9] Removing packages and firewall rules (best effort)..."
 for p in 3303/tcp 109/tcp 80/tcp 443/tcp 1194/tcp; do
     firewall-cmd --permanent --zone=public --remove-port="$p" >/dev/null 2>&1
 done
-for p in 7300/udp 2200/udp; do
+for p in 7300/udp; do
     firewall-cmd --permanent --zone=public --remove-port="$p" >/dev/null 2>&1
 done
 firewall-cmd --permanent --remove-masquerade >/dev/null 2>&1

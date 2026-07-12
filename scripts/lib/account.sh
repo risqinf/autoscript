@@ -140,7 +140,7 @@ ssh_print_cli() {
   ui_kv "WS TLS"    "443"
   ui_kv "SSH SSL"   "443"
   ui_kv "BadVPN"    "7300 (UDPGW)"
-  ui_kv "OpenVPN"   "1194 (TCP) / 2200 (UDP)"
+  ui_kv "OpenVPN"   "1194 (TCP)"
   ui_rule
   echo -e " ${WHITE}Config HTTP Custom :${NC}"
   echo -e " ${GREEN}${d}:1-65535@${user}:${pass}${NC}"
@@ -149,8 +149,6 @@ ssh_print_cli() {
   echo -e " ${GREEN}GET /ssh HTTP/1.1[crlf]Host: ${d}[crlf]Upgrade: websocket[crlf][crlf]${NC}"
   ui_rule
   ui_kv "OVPN TCP"    "https://${d}/risqinf/openvpn/tcp.ovpn"
-  ui_kv "OVPN UDP"    "https://${d}/risqinf/openvpn/udp.ovpn"
-  ui_kv "OVPN Bundle" "https://${d}/risqinf/openvpn/"
   ui_foot
 }
 
@@ -173,7 +171,7 @@ ssh_tg_text() {
 <b>Port WS TLS  :</b> <code>443</code>
 <b>Port SSH SSL :</b> <code>443</code>
 <b>Port BadVPN  :</b> <code>7300</code>
-<b>Port OpenVPN :</b> <code>1194 (TCP), 2200 (UDP)</code>
+<b>Port OpenVPN :</b> <code>1194 (TCP)</code>
 <b>━━━━━━━━━━━━━━━━━━━━━━━━━━━</b>
 <b>Config HTTP Custom :</b>
 <code>${d}:1-65535@${user}:${pass}</code>
@@ -182,8 +180,6 @@ ssh_tg_text() {
 <code>GET /ssh HTTP/1.1[crlf]Host: ${d}[crlf]Upgrade: websocket[crlf][crlf]</code>
 <b>━━━━━━━━━━━━━━━━━━━━━━━━━━━</b>
 <b>OVPN TCP :</b> <code>https://${d}/risqinf/openvpn/tcp.ovpn</code>
-<b>OVPN UDP :</b> <code>https://${d}/risqinf/openvpn/udp.ovpn</code>
-<b>OVPN Dir :</b> <code>https://${d}/risqinf/openvpn/</code>
 <b>━━━━━━━━━━━━━━━━━━━━━━━━━━━</b>
 EOF
 }

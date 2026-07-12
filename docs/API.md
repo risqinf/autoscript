@@ -83,7 +83,7 @@ curl -X POST https://<domain>/api/add-ssh \
     "expired": "2025-07-15 14:30:00",
     "ports": {
       "ssh": "109", "ws_http": "80, 8888", "ws_tls": "443",
-      "badvpn": "7300", "openvpn_tcp": "1194", "openvpn_udp": "2200"
+      "badvpn": "7300", "openvpn_tcp": "1194"
     },
     "config": "your-domain:1-65535@john_doe:Secret123"
   }

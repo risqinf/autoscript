@@ -148,10 +148,7 @@ ressshws=$(ssh_stack_badge)
 resngx=$(svc_badge nginx)
 resv2r=$(svc_badge xray)
 reshap=$(svc_badge haproxy)
-resovpn="${RED}[ OFF ]${NC}"
-{ [[ $(systemctl is-active openvpn-server@server-tcp-1194 2>/dev/null) == "active" ]] \
-  || [[ $(systemctl is-active openvpn-server@server-udp-2200 2>/dev/null) == "active" ]]; } \
-  && resovpn="${GREEN}[ ON ]${NC}"
+resovpn=$(svc_badge openvpn-server@server-tcp-1194)
 
 # --- SYSTEM INFO ---
 DOMAIN=$(cat /etc/xray/domain 2>/dev/null || echo "Not Set")

@@ -18,7 +18,6 @@ ROWS=(
   "ssh-ws|SSH WebSocket|8888"
   "sshd|OpenSSH|22, 3303"
   "openvpn-server@server-tcp-1194|OpenVPN TCP|1194"
-  "openvpn-server@server-udp-2200|OpenVPN UDP|2200"
   "vnstat|vnStat (bandwidth)|-"
   "rsyslog|rsyslog (secure)|-"
   "firewalld|Firewall|-"

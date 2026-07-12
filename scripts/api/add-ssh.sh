@@ -37,6 +37,6 @@ jq -nc --arg u "$user" --arg p "$pass" --arg d "$domain" --arg ip "$ip" \
       --argjson li "$limit_ip" --arg exp "$exp_disp" \
 '{status:"true",code:201,message:"SSH account created successfully",
   data:{username:$u,password:$p,domain:$d,ip:$ip,limit_ip:$li,expired:$exp,
-        ports:{ssh:"109",ws_http:"80, 8888",ws_tls:"443",badvpn:"7300",
-               openvpn_tcp:"1194",openvpn_udp:"2200"},
+         ports:{ssh:"109",ws_http:"80, 8888",ws_tls:"443",badvpn:"7300",
+                openvpn_tcp:"1194"},
         config:($d+":1-65535@"+$u+":"+$p)}}'
