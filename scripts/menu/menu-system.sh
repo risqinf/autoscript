@@ -19,7 +19,9 @@ menu_system() {
     ui_opt 7  "Change Timezone"
     ui_opt 8  "Service Status"
     ui_opt 9  "Telegram Setup"
-    ui_opt 10 "Uninstall Script"
+    ui_opt 10 "Limit Speed (Bandwidth Shaper)"
+    ui_opt 11 "Bandwidth Monitor (vnstat)"
+    ui_opt 12 "Uninstall Script"
     ui_rule
     ui_opt 0 "Back to Main Menu"
     ui_foot
@@ -34,7 +36,9 @@ menu_system() {
         7) clear ; change-timezone ;;
         8) clear ; status ;;
         9) clear ; set-telegram ;;
-        10) clear ; uninstall ;;
+        10) clear ; limit-speed ; ui_back ; menu_system ;;
+        11) clear ; bw-monitor ; ui_back ; menu_system ;;
+        12) clear ; uninstall ;;
         0|x|X) clear ; menu ;;
         *) err "Invalid option."; sleep 1; menu_system ;;
     esac
