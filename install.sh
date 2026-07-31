@@ -3,11 +3,11 @@
 # Project: Autoscript VPN by risqinf
 # Description: AutoScript VPN & Tunneling Management System
 # Developed for Rocky Linux 9
-# Version: 0.2.0-beta
+# Version: 0.3.0-beta
 # License: Apache License 2.0 (see LICENSE file)
 # Repository: https://github.com/risqinf/autoscript
 # ========================================================
-AS_VERSION="0.2.0-beta"
+AS_VERSION="0.3.0-beta"
 # --- Color Definitions ---
 NC='\033[0m'
 RED='\033[0;31m'
@@ -170,6 +170,8 @@ while true; do
 done
 printf '%s' "$backup_pass" >/etc/xray/backup.pass
 chmod 600 /etc/xray/backup.pass
+printf 'zip' >/etc/xray/autobackup.type
+touch /etc/xray/cloudvault.url
 unset root_pass root_pass2 backup_pass backup_pass2
 print_success "Backup password saved to /etc/xray/backup.pass (chmod 600)."
 sleep 1
@@ -1532,13 +1534,15 @@ EOF
 
   CA_DATA=$(cat /etc/openvpn/server/ca.crt)
   TA_DATA=$(cat /etc/openvpn/server/ta.key)
+  MYIP=$(curl -s http://checkip.amazonaws.com 2>/dev/null)
+  [[ -z "$MYIP" ]] && MYIP=$(hostname -I | awk '{print $1}')
 
-  # Client OVPN Generation (TCP only)
+  # Client OVPN Generation (TCP only - using IP VPS for CDN/proxied domain compatibility)
   cat >$WEB_DIR/tcp.ovpn <<EOF
 client
 dev tun
 proto tcp
-remote $domain 1194
+remote $MYIP 1194
 resolv-retry infinite
 nobind
 persist-key
@@ -1574,14 +1578,8 @@ EOF
   check_service "openvpn-server@server-tcp-1194" || print_warn "OpenVPN TCP not active."
 }
 
-if [[ -f "/etc/openvpn/server/server-tcp-1194.conf" ]]; then
-  # OpenVPN configuration is complex, we just check for file existence
-  # but we can check if the domain matches in the generated files.
-  if grep -q "$domain" "$WEB_DIR/tcp.ovpn" 2>/dev/null; then
-    echo -e "\e[32m[SKIP]\e[0m OpenVPN is already installed and matches current domain."
-  else
-    ovpn_install_logic
-  fi
+if [[ -f "/etc/openvpn/server/server-tcp-1194.conf" && -f "$WEB_DIR/tcp.ovpn" ]]; then
+  echo -e "\e[32m[SKIP]\e[0m OpenVPN is already installed."
 else
   ovpn_install_logic
 fi

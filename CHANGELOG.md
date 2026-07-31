@@ -3,6 +3,41 @@
 All notable changes to this project are documented here.
 This project adheres to [Semantic Versioning](https://semver.org/).
 
+## [0.3.0-beta] - 2026-08-01
+
+Direct upgrade to **v0.3.0-beta**. Consolidates Cloud Vault integration, multi-method Backup & Restore, bandwidth monitoring, speed limiting, Go API server integration, systemd timer migration, OpenVPN TCP consolidation, SELinux policies, and scanner protection fixes.
+
+### Added
+- **Cloud Vault Integration (`cloud-vault`)**: Integrated backup API server ([sela-putri/cloud-vault](https://github.com/sela-putri/cloud-vault)) supporting remote encrypted backup storage and code-based restore functionality (`url=""` variable configuration support).
+- **Multi-Method Backup & Restore Menu**: Restructured `menu-backup` with 3 distinct backup & restore methods:
+  1. **Telegram Bot** (send encrypted backup archive to Telegram / restore via Telegram File ID)
+  2. **Manual File Zip** (save or restore local `.zip` archives)
+  3. **Cloud Vault** (upload or restore via Cloud Vault API and 1-click restore codes)
+- **Selectable Auto-Backup Type**: User can configure which backup method (Manual Zip, Telegram Bot, or Cloud Vault) is executed automatically by the scheduled systemd backup timer (`/etc/xray/autobackup.type`).
+- **Cloud Vault Configuration**: Dedicated menu option and helper functions to configure and update the Cloud Vault API URL (`/etc/xray/cloudvault.url`).
+- **Bandwidth Monitor & Speed Limiter**:
+  - Added `bw-monitor` (`bw-monitor.sh`) for live bandwidth monitoring per interface and user.
+  - Added `limit-speed` (`limit-speed.sh`) for dynamic interface and client speed shaping via `tc` / `wondershaper` qdisc rules.
+- **Go API Server (`apiserver`)**: Added native Go REST API server implementation in `files/internal/` and `files/cmd/apiserver` for high-performance SQLite-backed VPN account management.
+- **Systemd Timers Migration**: Replaced all legacy cron jobs with native systemd timers (`autoexpire.timer`, `limit-ip-ssh.timer`, `backup.timer`, `fixlog.timer`) and added `expire-all` script.
+- **SELinux Compatibility**: Automated SELinux boolean configuration (`httpd_can_network_connect=1`) in `install.sh` to prevent Nginx proxying 13 Permission Denied errors on EL9 Enforcing systems.
+- **ISP Scanner Shield (`FIX-GUIDE.md`)**: Nginx status code 444 guards (`return 444` when `Upgrade: websocket` header is absent) to silently drop ISP scanner probes.
+- **Contributors Section**: Added a contributors showcase in `README.md` acknowledging contributions by `sela-putri` and `risqinf`.
+
+### Changed
+- **OpenVPN Architecture**: Removed OpenVPN UDP (port 2200/udp) to simplify firewall rules and focus on OpenVPN TCP (port 1194/tcp) for maximum stability and gaming compatibility (PUBG Mobile, MLBB, etc.).
+- **SSH WebSocket Dual Payload Fix**: Improved Nginx root-path `/` request discrimination using `Sec-WebSocket-Key` header checking to prevent VMESS clients and raw SSH WebSocket injectors from conflicting.
+- **Traffic Accounting & Monitors**:
+  - Xray traffic accounting now tracks both uplink and downlink for all account tiers (including unlimited accounts).
+  - Account checkers (`cek-ssh`, `cek-vless`, `cek-vmess`, `cek-trojan`) updated to list active connections only, with ANSI-tolerant log parsing and liveness correlation.
+- **Telegram Delivery Improvements**: Added HTML escaping for dynamic account link fields, rate-limit (HTTP 429) retry handling with backoff, and plain-text fallback delivery.
+- **System Menu & Service Management**: Enhanced `status` command with interactive service controls (start/stop/restart/enable/disable) for installed services.
+
+### Refactored & Fixed
+- Refactored `backup` and `restore` system commands (`scripts/system/backup.sh` and `scripts/system/restore.sh`) to support multi-target CLI options and automatic fallback handling.
+- Enhanced shared library `scripts/lib/common.sh` with paths and helpers for Cloud Vault URL (`get_cloud_vault_url`) and Auto-Backup Type (`get_autobackup_type`).
+- Updated `install.sh` to initialize default backup configurations (`autobackup.type` and `cloudvault.url`).
+
 ## [0.2.0-beta] - 2026-06-10
 
 Developed for **Rocky Linux 9**. Builds on 0.1.0-beta with routing, output,
@@ -167,5 +202,6 @@ First public beta. Developed for **Rocky Linux 9**.
 - Legacy `.txt` account files and `config.json` comment markers.
 - Ads Block (helium) menu entry.
 
+[0.3.0-beta]: https://github.com/risqinf/autoscript/releases/tag/v0.3.0-beta
 [0.2.0-beta]: https://github.com/risqinf/autoscript/releases/tag/v0.2.0-beta
 [0.1.0-beta]: https://github.com/risqinf/autoscript/releases/tag/v0.1.0-beta

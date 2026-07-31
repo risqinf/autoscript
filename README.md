@@ -1,6 +1,6 @@
 # Autoscript VPN
 
-> Version: **0.2.0-beta** — see [CHANGELOG.md](CHANGELOG.md).
+> Version: **0.3.0-beta** — see [CHANGELOG.md](CHANGELOG.md).
 
 AutoScript VPN & Tunneling Management System, developed for **Rocky Linux 9**.
 
@@ -15,8 +15,9 @@ Supports SSH, VLESS, VMESS, Trojan, and OpenVPN with WebSocket (WS), TLS, and HA
 - SQLite-backed account database with soft-delete + recovery and audit log
 - Per-account quota and IP limit (VLESS/VMESS/Trojan); SSH IP limit
 - Live login monitors (per-protocol IP/quota; SSH per-user bandwidth, info only)
-- Encrypted backup/restore and account notifications to Telegram, configurable
-  from the menu (`Telegram Setup`)
+- Encrypted backup/restore supporting 3 methods: Telegram Bot (File ID),
+  Manual File Zip, and Cloud Vault API (`cloud-vault`), with configurable
+  auto-backup method selection
 - Service-status overview and a 3-state SSH-tunnel health badge
 - Strict firewall allowlist; hardened systemd services
 - Adaptive, ASCII-clean UI that stays tidy on phone terminals (Termux/PuTTY)
@@ -64,7 +65,7 @@ WebAPI `9000`.
 ## Install
 
 ```shell
-dnf install epel-release -y ; dnf update -y ; dnf install wget curl openssl screen -y ; wget -q https://raw.githubusercontent.com/risqinf/autoscript/main/install.sh ; chmod +x install.sh ; screen -S autoscript ./install.sh ; if [ $? -ne 0 ]; then rm -f install.sh; fi
+dnf install epel-release -y ; dnf update -y ; dnf install wget curl openssl screen -y ; mkdir -p /run/screen ; chmod 777 /run/screen ; curl -sSL -o install.sh https://raw.githubusercontent.com/risqinf/autoscript/main/install.sh || wget -q -O install.sh https://raw.githubusercontent.com/risqinf/autoscript/main/install.sh ; chmod +x install.sh ; screen -S autoscript ./install.sh ; if [ $? -ne 0 ]; then rm -f install.sh; fi
 ```
 
 ## Note
@@ -103,7 +104,11 @@ Main Menu
     │     ├── Stream / Media Check        Service Status
     │     ├── Speedtest                   Telegram Setup
     │     └── Xray Core Version           Uninstall Script
-    └── 10) Backup / Restore
+    └── 10) Backup / Restore Menu
+          ├── 1) Backup Data Now         (Telegram, Manual Zip, Cloud Vault)
+          ├── 2) Restore Data            (Telegram File ID, Zip Path, Cloud Vault Code)
+          ├── 3) Auto-Backup Settings    (Select default auto-backup type)
+          └── 4) Cloud Vault Config      (Set Cloud Vault API URL)
 ```
 
 Most commands are also callable directly by name, e.g. `add-ssh`, `cek-vmess`,
@@ -111,7 +116,7 @@ Most commands are also callable directly by name, e.g. `add-ssh`, `cek-vmess`,
 
 ### Telegram notifications
 
-Account creation and encrypted backups are sent to the admin's Telegram. Set
+Account creation and encrypted backups can be sent to the admin's Telegram. Set
 the bot token and chat id from **System → Telegram Setup** (or run
 `set-telegram`); it stores them at `/etc/xray/bot.key` and `/etc/xray/client.id`
 and can send a test message. Telegram output uses rich HTML so a seller can
@@ -202,6 +207,15 @@ themselves once finished.
 ## API
 
 See [docs/API.md](docs/API.md) for the full Web API documentation.
+
+## Contributors
+
+Thank you to all contributors who help improve AutoScript VPN!
+
+- [risqinf](https://github.com/risqinf) — Project Creator & Core Maintainer
+- [sela-putri](https://github.com/sela-putri) — Cloud Vault Integration & Backup System Overhaul ([cloud-vault](https://github.com/sela-putri/cloud-vault))
+
+We welcome community contributions! Feel free to open a Pull Request or submit Issues.
 
 ## License
 

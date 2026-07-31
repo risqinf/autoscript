@@ -17,7 +17,25 @@ export AS_CONFIG="${AS_ETC}/config.json"
 export AS_DOMAIN_FILE="${AS_ETC}/domain"
 export AS_BOTKEY="${AS_ETC}/bot.key"
 export AS_CHATID="${AS_ETC}/client.id"
+export AS_CLOUD_VAULT_URL="${AS_ETC}/cloudvault.url"
+export AS_AUTOBACKUP_TYPE="${AS_ETC}/autobackup.type"
 export AS_LIBDIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+get_cloud_vault_url() {
+  if [[ -s "$AS_CLOUD_VAULT_URL" ]]; then
+    cat "$AS_CLOUD_VAULT_URL" 2>/dev/null
+  else
+    echo ""
+  fi
+}
+
+get_autobackup_type() {
+  if [[ -s "$AS_AUTOBACKUP_TYPE" ]]; then
+    cat "$AS_AUTOBACKUP_TYPE" 2>/dev/null
+  else
+    echo "zip"
+  fi
+}
 
 # --- Colors ---
 export NC='\033[0m'
