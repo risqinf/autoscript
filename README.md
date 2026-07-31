@@ -217,13 +217,19 @@ Thank you to all contributors who help improve AutoScript VPN!
   <tr>
     <td align="center" width="120px">
       <a href="https://github.com/risqinf">
-        <img src="https://github.com/risqinf.png" width="80px;" alt="risqinf"/><br />
+        <img src="https://avatars.githubusercontent.com/u/175401284?v=4" width="80px;" alt="risqinf"/><br />
         <sub><b>risqinf</b></sub>
       </a>
     </td>
     <td align="center" width="120px">
+      <a href="https://github.com/nadiavpn">
+        <img src="https://avatars.githubusercontent.com/u/166901582?v=4" width="80px;" alt="nadiavpn"/><br />
+        <sub><b>nadiavpn</b></sub>
+      </a>
+    </td>
+    <td align="center" width="120px">
       <a href="https://github.com/sela-putri">
-        <img src="https://github.com/sela-putri.png" width="80px;" alt="sela-putri"/><br />
+        <img src="https://avatars.githubusercontent.com/u/311260220?v=4" width="80px;" alt="sela-putri"/><br />
         <sub><b>sela-putri</b></sub>
       </a>
     </td>
