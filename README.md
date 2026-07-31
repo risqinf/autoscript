@@ -212,8 +212,30 @@ See [docs/API.md](docs/API.md) for the full Web API documentation.
 
 Thank you to all contributors who help improve AutoScript VPN!
 
-- [risqinf](https://github.com/risqinf) — Project Creator & Core Maintainer
-- [sela-putri](https://github.com/sela-putri) — Cloud Vault Integration & Backup System Overhaul ([cloud-vault](https://github.com/sela-putri/cloud-vault))
+<!-- ALL-CONTRIBUTORS-LIST:START - Do not remove or modify this section -->
+<table align="center">
+  <tr>
+    <td align="center" width="120px">
+      <a href="https://github.com/risqinf">
+        <img src="https://github.com/risqinf.png" width="80px;" alt="risqinf"/><br />
+        <sub><b>risqinf</b></sub>
+      </a>
+    </td>
+    <td align="center" width="120px">
+      <a href="https://github.com/sela-putri">
+        <img src="https://github.com/sela-putri.png" width="80px;" alt="sela-putri"/><br />
+        <sub><b>sela-putri</b></sub>
+      </a>
+    </td>
+  </tr>
+</table>
+<!-- ALL-CONTRIBUTORS-LIST:END -->
+
+<p align="center">
+  <a href="https://github.com/risqinf/autoscript/graphs/contributors">
+    <img src="https://contrib.rocks/preview?repo=risqinf%2Fautoscript" alt="Contributors list" />
+  </a>
+</p>
 
 We welcome community contributions! Feel free to open a Pull Request or submit Issues.
 

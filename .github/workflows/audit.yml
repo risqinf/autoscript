@@ -1,0 +1,51 @@
+name: Project Code Audit
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+  workflow_dispatch:
+
+jobs:
+  shell-audit:
+    name: Shell Script Audit
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Syntax Check All Shell Scripts (bash -n)
+        run: |
+          echo "Auditing shell script syntax..."
+          find . -type f -name "*.sh" -exec bash -n {} +
+          bash -n install.sh
+          bash -n uninstall.sh
+          bash -n install-api.sh
+          echo "All shell scripts passed syntax validation successfully!"
+
+      - name: Run ShellCheck
+        uses: ludeeus/action-shellcheck@master
+        with:
+          ignore_paths: 'files'
+        continue-on-error: true
+
+  go-audit:
+    name: Go REST API Server Audit
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.22'
+
+      - name: Run Go Vet & Build Check
+        run: |
+          if [ -d "files" ]; then
+            cd files
+            go vet ./...
+            go build -v ./...
+          fi
