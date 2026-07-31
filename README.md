@@ -237,12 +237,6 @@ Thank you to all contributors who help improve AutoScript VPN!
 </table>
 <!-- ALL-CONTRIBUTORS-LIST:END -->
 
-<p align="center">
-  <a href="https://github.com/risqinf/autoscript/graphs/contributors">
-    <img src="https://contrib.rocks/preview?repo=risqinf%2Fautoscript" alt="Contributors list" />
-  </a>
-</p>
-
 We welcome community contributions! Feel free to open a Pull Request or submit Issues.
 
 ## License
