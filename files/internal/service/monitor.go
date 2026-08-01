@@ -52,6 +52,7 @@ func (s *monitorService) GetServiceStatus(ctx context.Context) ([]model.ServiceS
 		{"dropbear", "109"},
 		{"ssh-ws", "8888"},
 		{"sshd", "22, 3303"},
+		{"squid", "3128"},
 		{"openvpn-server@server-tcp-1194", "1194"},
 		{"vnstat", ""},
 		{"rsyslog", ""},

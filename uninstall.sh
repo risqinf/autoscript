@@ -32,7 +32,7 @@ fi
 # ---------------------------------------------------------------------------
 echo "[1/9] Stopping and disabling services..."
 SERVICES=(
-    haproxy xray nginx dropbear ssh-ws server api-server
+    haproxy xray nginx dropbear ssh-ws server api-server squid
     quota limit-ip-vless quota-trojan limit-ip-trojan quota-vmess limit-ip-vmess
     autoexpire.timer limit-ip-ssh.timer backup.timer fixlog.timer
     openvpn-server@server-tcp-1194
@@ -136,6 +136,7 @@ rm -f  /etc/haproxy/haproxy.pem
 rm -rf /root/.acme.sh 2>/dev/null
 rm -rf /etc/dropbear
 rm -rf /etc/openvpn
+rm -rf /etc/squid
 rm -rf /var/www/html/risqinf
 rm -rf /var/log/xray
 
@@ -165,7 +166,7 @@ fi
 # ---------------------------------------------------------------------------
 echo "[9/9] Removing packages and firewall rules (best effort)..."
 # Close the ports the installer opened (leave 22 so you keep SSH access).
-for p in 3303/tcp 109/tcp 80/tcp 443/tcp 1194/tcp; do
+for p in 3303/tcp 109/tcp 80/tcp 443/tcp 1194/tcp 3128/tcp 8888/tcp 9000/tcp; do
     firewall-cmd --permanent --zone=public --remove-port="$p" >/dev/null 2>&1
 done
 for p in 7300/udp; do
@@ -173,7 +174,7 @@ for p in 7300/udp; do
 done
 firewall-cmd --permanent --remove-masquerade >/dev/null 2>&1
 firewall-cmd --reload >/dev/null 2>&1
-dnf remove haproxy nginx dropbear openvpn easy-rsa -y >/dev/null 2>&1
+dnf remove haproxy nginx dropbear openvpn easy-rsa squid -y >/dev/null 2>&1
 
 echo ""
 echo -e "\e[0;42;30m              UNINSTALLATION COMPLETE                       \e[0m"

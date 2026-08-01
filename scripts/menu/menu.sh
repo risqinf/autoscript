@@ -149,6 +149,7 @@ resngx=$(svc_badge nginx)
 resv2r=$(svc_badge xray)
 reshap=$(svc_badge haproxy)
 resovpn=$(svc_badge openvpn-server@server-tcp-1194)
+ressquid=$(svc_badge squid)
 resapi=$(svc_badge api-server)
 
 # --- SYSTEM INFO ---
@@ -185,6 +186,7 @@ ui_status "Xray Core" "$resv2r"
 ui_status "Nginx"     "$resngx"
 ui_status "HAProxy"   "$reshap"
 ui_status "OpenVPN"   "$resovpn"
+ui_status "Squid"     "$ressquid"
 ui_status "API"       "$resapi"
 ui_rule
 ui_label "ACCOUNT PANELS"

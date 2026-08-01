@@ -17,6 +17,7 @@ ROWS=(
   "dropbear|Dropbear SSH|109"
   "ssh-ws|SSH WebSocket|8888"
   "sshd|OpenSSH|22, 3303"
+  "squid|Squid Proxy|3128"
   "openvpn-server@server-tcp-1194|OpenVPN TCP|1194"
   "api-server|API Server|9000*"
   "vnstat|vnStat (bandwidth)|-"

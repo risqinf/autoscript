@@ -139,6 +139,7 @@ ssh_print_cli() {
   ui_kv "WS HTTP"   "80, 8888"
   ui_kv "WS TLS"    "443"
   ui_kv "SSH SSL"   "443"
+  ui_kv "Squid"     "3128"
   ui_kv "BadVPN"    "7300 (UDPGW)"
   ui_kv "OpenVPN"   "1194 (TCP)"
   ui_rule
@@ -170,6 +171,7 @@ ssh_tg_text() {
 <b>Port WS HTTP :</b> <code>80, 8888</code>
 <b>Port WS TLS  :</b> <code>443</code>
 <b>Port SSH SSL :</b> <code>443</code>
+<b>Port Squid   :</b> <code>3128</code>
 <b>Port BadVPN  :</b> <code>7300</code>
 <b>Port OpenVPN :</b> <code>1194 (TCP)</code>
 <b>━━━━━━━━━━━━━━━━━━━━━━━━━━━</b>
