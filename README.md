@@ -233,6 +233,12 @@ Thank you to all contributors who help improve AutoScript VPN!
         <sub><b>sela-putri</b></sub>
       </a>
     </td>
+    <td align="center" width="120px">
+      <a href="https://github.com/farelvpn">
+        <img src="https://avatars.githubusercontent.com/u/199040492?v=4" width="80px;" alt="farelvpn"/><br />
+        <sub><b>farelvpn</b></sub>
+      </a>
+    </td>
   </tr>
 </table>
 <!-- ALL-CONTRIBUTORS-LIST:END -->
