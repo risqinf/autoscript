@@ -5,18 +5,10 @@
 # License: Apache License 2.0 (see LICENSE file)
 # Repository: https://github.com/risqinf/autoscript
 # ========================================================
-. /usr/local/sbin/lib/common.sh
+[[ -f /usr/local/sbin/lib/common.sh ]] && . /usr/local/sbin/lib/common.sh || . "$(dirname "$0")/../lib/common.sh"
 
 require_root
 backup_dir="/root"
-
-pass_file="${AS_ETC}/backup.pass"
-if [[ -s "$pass_file" ]]; then
-  PASSWORD=$(cat "$pass_file")
-else
-  read -rsp "Enter backup encryption password: " PASSWORD; echo
-  [[ -z "$PASSWORD" ]] && { err "Password cannot be empty."; exit 1; }
-fi
 
 clear
 line
@@ -60,21 +52,20 @@ case "$METHOD" in
 
     backup_file="/tmp/tg_restore.zip"
     info "Downloading backup archive from Telegram..."
-    curl -s -L -o "$backup_file" "https://api.telegram.org/file/bot${botToken}/${file_path}"
+    curl -sSL -o "$backup_file" "https://api.telegram.org/file/bot${botToken}/${file_path}"
     ;;
 
   3|cloudvault|cloud-vault|CloudVault)
     cv_url=$(get_cloud_vault_url)
     if [[ -z "$cv_url" ]]; then
-      read -rp "Enter Cloud Vault Base URL (e.g. https://vault.example.com): " cv_url
+      read -rp "Enter Cloud Vault Base URL (e.g. https://cv.risqinf.dev): " cv_url
       [[ -z "$cv_url" ]] && { err "Cloud Vault URL cannot be empty."; exit 1; }
     fi
     read -rp "Enter Cloud Vault Restore Code: " cv_code
     [[ -z "$cv_code" ]] && { err "Restore code cannot be empty."; exit 1; }
 
     backup_file="/tmp/cv_restore.zip"
-    info "Downloading backup archive from Cloud Vault (${cv_url})..."
-    curl -s -L -o "$backup_file" "${cv_url}/api/file/${cv_code}"
+    download_cloudvault_archive "$cv_url" "$cv_code" "$backup_file" || exit 1
     ;;
 
   2|zip|manual|Zip|*)
@@ -91,11 +82,35 @@ case "$METHOD" in
     ;;
 esac
 
-[[ -f "$backup_file" ]] || { err "Backup file not found at: ${backup_file}"; exit 1; }
+if [[ ! -f "$backup_file" || ! -s "$backup_file" ]]; then
+  err "Backup file not found or empty at: ${backup_file}"
+  exit 1
+fi
+
+if ! head -c 4 "$backup_file" 2>/dev/null | grep -q 'PK'; then
+  err "Selected file is not a valid zip archive."
+  exit 1
+fi
 
 which unzip >/dev/null 2>&1 || dnf install unzip -y >/dev/null 2>&1
-if ! unzip -t -P "$PASSWORD" "$backup_file" &>/dev/null; then
-  err "Invalid archive or wrong encryption password."; exit 1
+
+pass_file="${AS_ETC}/backup.pass"
+PASSWORD=""
+if [[ -s "$pass_file" ]]; then
+  PASSWORD=$(cat "$pass_file")
+fi
+
+if [[ -z "$PASSWORD" ]] || ! unzip -t -P "$PASSWORD" "$backup_file" &>/dev/null; then
+  if [[ -n "$PASSWORD" ]]; then
+    warn "Stored password in ${pass_file} did not match archive."
+  fi
+  read -rsp "Enter backup encryption password: " PASSWORD; echo
+  [[ -z "$PASSWORD" ]] && { err "Password cannot be empty."; exit 1; }
+
+  if ! unzip -t -P "$PASSWORD" "$backup_file" &>/dev/null; then
+    err "Invalid archive or wrong encryption password."
+    exit 1
+  fi
 fi
 
 work="/root/.restore_work"
@@ -115,6 +130,8 @@ mkdir -p "$AS_ETC"; chmod 700 "$AS_ETC"
 [[ -f "$work/shadow" ]]              && cp -f "$work/shadow" /etc/
 [[ -f "$work/group" ]]               && cp -f "$work/group" /etc/
 [[ -f "$work/gshadow" ]]             && cp -f "$work/gshadow" /etc/
+
+printf '%s' "$PASSWORD" > "$pass_file"; chmod 600 "$pass_file"
 
 rm -rf "$work"
 [[ "$backup_file" == /tmp/*.zip ]] && rm -f "$backup_file"

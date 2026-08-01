@@ -37,6 +37,44 @@ get_autobackup_type() {
   fi
 }
 
+download_cloudvault_archive() {
+  local cv_url="$1"
+  local cv_code="$2"
+  local dest="$3"
+  local target_url="${cv_url}/api/file/${cv_code}"
+
+  info "Downloading backup archive from Cloud Vault (${cv_url})..."
+  local cookie_file="/tmp/cv_cookie_$$.txt"
+  rm -f "$cookie_file" "$dest"
+
+  curl -sSL -c "$cookie_file" -b "$cookie_file" -o "$dest" "$target_url"
+
+  if [[ ! -s "$dest" ]]; then
+    err "Failed to download file from Cloud Vault (empty response)."
+    rm -f "$cookie_file"
+    return 1
+  fi
+
+  if grep -qi '<html' "$dest" || grep -qi '<!DOCTYPE' "$dest"; then
+    local gdrive_id
+    gdrive_id=$(grep -o 'name="id" value="[^"]*"' "$dest" | head -n1 | cut -d'"' -f4)
+    if [[ -n "$gdrive_id" ]]; then
+      info "Detected Google Drive virus scan warning, following download confirmation..."
+      curl -sSL -c "$cookie_file" -b "$cookie_file" -o "$dest" "https://drive.usercontent.google.com/download?id=${gdrive_id}&export=download&confirm=t"
+    fi
+  fi
+
+  rm -f "$cookie_file"
+
+  if ! head -c 4 "$dest" 2>/dev/null | grep -q 'PK'; then
+    err "Downloaded content is not a valid zip archive (Cloud Vault/Google Drive returned HTML or error)."
+    return 1
+  fi
+
+  return 0
+}
+
+
 # --- Colors ---
 export NC='\033[0m'
 export RED='\033[0;31m'
