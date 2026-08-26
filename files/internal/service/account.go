@@ -9,6 +9,8 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
+	"regexp"
+	"strconv"
 	"strings"
 	"time"
 
@@ -86,6 +88,28 @@ func (s *accountService) getLiveSSHUsage(ctx context.Context, username string) i
 	return 0
 }
 
+// getLiveXrayUsage fetches real-time traffic (uplink + downlink) from Xray stats API (port 10085),
+// mirroring 1:1 xray_user_bytes from scripts/lib/account.sh.
+func (s *accountService) getLiveXrayUsage(ctx context.Context, username string) int64 {
+	var total int64
+	re := regexp.MustCompile(`"value":\s*"?(\d+)"?`)
+	for _, dir := range []string{"uplink", "downlink"} {
+		statName := fmt.Sprintf("user>>>%s>>>traffic>>>%s", username, dir)
+		cmd := exec.CommandContext(ctx, s.config.XrayBinary, "api", "stats", "--server=127.0.0.1:10085", "-name", statName)
+		output, err := cmd.Output()
+		if err != nil {
+			continue
+		}
+		matches := re.FindSubmatch(output)
+		if len(matches) > 1 {
+			if val, err := strconv.ParseInt(string(matches[1]), 10, 64); err == nil && val > 0 {
+				total += val
+			}
+		}
+	}
+	return total
+}
+
 // GetAccount retrieves an account by protocol and username.
 func (s *accountService) GetAccount(ctx context.Context, protocol, username string) (*model.Account, error) {
 	account, err := s.repo.GetByUsername(ctx, protocol, username)
@@ -101,6 +125,10 @@ func (s *accountService) GetAccount(ctx context.Context, protocol, username stri
 		if liveBytes := s.getLiveSSHUsage(ctx, username); liveBytes > 0 {
 			account.UsedBytes = liveBytes
 		}
+	} else if protocol == "vless" || protocol == "vmess" || protocol == "trojan" {
+		// For Xray, live total = persisted DB bytes + un-reset counter (1:1 with cek-vmess/vless/trojan)
+		liveBytes := s.getLiveXrayUsage(ctx, username)
+		account.UsedBytes += liveBytes
 	}
 
 	return account, nil
