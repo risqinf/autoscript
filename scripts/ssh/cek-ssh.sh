@@ -175,6 +175,13 @@ for pport in "${!ACTIVEPORT[@]}"; do
   user="${PORT2USER[$pport]}"
   [[ -z "$user" ]] && user="(detecting)"
   
+  tx="${S_TX[$pport]:--}"; rx="${S_RX[$pport]:--}"; tot="${S_TOT[$pport]:--}"
+
+  # Ignore unauthenticated handshake ghost probes (TX: 0 B, only received SSH banner)
+  if [[ "$user" == "(detecting)" && "$tx" == "0 B" ]]; then
+    continue
+  fi
+
   cip="${S_CIP[$pport]}"
   cip="${cip%%:*}"
   if [[ -z "$cip" || "$cip" == "(detecting)" ]]; then
@@ -192,7 +199,6 @@ for pport in "${!ACTIVEPORT[@]}"; do
     [[ -z "$up" ]] && up="-"
   fi
 
-  tx="${S_TX[$pport]:--}"; rx="${S_RX[$pport]:--}"; tot="${S_TOT[$pport]:--}"
   if [[ "$tx" == "-" && "$rx" == "-" ]]; then
     bw_display="Live (Direct/SSL)"
   else
