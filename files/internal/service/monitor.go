@@ -3,7 +3,9 @@ package service
 import (
 	"bufio"
 	"context"
+	"encoding/json"
 	"fmt"
+	"net/http"
 	"os"
 	"os/exec"
 	"regexp"
@@ -144,6 +146,57 @@ func (s *monitorService) GetSystemInfo(ctx context.Context) (*model.SystemInfo, 
 	return info, nil
 }
 
+// parseSSHSessions fetches active SSH sessions from ssh-ws API (port 8081).
+func (s *monitorService) parseSSHSessions(ctx context.Context) (map[string][]string, map[string]int64) {
+	ipsByUser := make(map[string][]string)
+	bytesByUser := make(map[string]int64)
+
+	client := &http.Client{Timeout: 800 * time.Millisecond}
+	req, err := http.NewRequestWithContext(ctx, "GET", "http://127.0.0.1:8081/api/sessions", nil)
+	if err != nil {
+		return ipsByUser, bytesByUser
+	}
+	resp, err := client.Do(req)
+	if err != nil {
+		return ipsByUser, bytesByUser
+	}
+	defer resp.Body.Close()
+
+	var result struct {
+		Success bool `json:"success"`
+		Data    struct {
+			Sessions []struct {
+				Username     string `json:"username"`
+				RealClientIP string `json:"real_client_ip"`
+				TxBytes      int64  `json:"tx_bytes"`
+				RxBytes      int64  `json:"rx_bytes"`
+			} `json:"sessions"`
+		} `json:"data"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return ipsByUser, bytesByUser
+	}
+
+	seenIPs := make(map[string]map[string]bool)
+	for _, sess := range result.Data.Sessions {
+		if sess.Username == "" || sess.Username == "detecting..." {
+			continue
+		}
+		u := sess.Username
+		if seenIPs[u] == nil {
+			seenIPs[u] = make(map[string]bool)
+		}
+		ip := strings.Split(sess.RealClientIP, ":")[0]
+		if ip != "" && !seenIPs[u][ip] {
+			seenIPs[u][ip] = true
+			ipsByUser[u] = append(ipsByUser[u], ip)
+		}
+		bytesByUser[u] += sess.TxBytes + sess.RxBytes
+	}
+
+	return ipsByUser, bytesByUser
+}
+
 // GetMonitorEntries returns login monitor entries for a protocol.
 func (s *monitorService) GetMonitorEntries(ctx context.Context, protocol string) ([]model.MonitorEntry, error) {
 	// Get active accounts
@@ -152,11 +205,18 @@ func (s *monitorService) GetMonitorEntries(ctx context.Context, protocol string)
 		return nil, fmt.Errorf("list accounts: %w", err)
 	}
 
-	// Parse access log
-	logPath := "/var/log/xray/access.log"
-	ipsByUser, err := s.parseAccessLog(logPath, 180) // 3 minute window
-	if err != nil {
-		s.logger.Warn().Err(err).Msg("failed to parse access log")
+	var ipsByUser map[string][]string
+	var sshBytesByUser map[string]int64
+
+	if protocol == "ssh" {
+		ipsByUser, sshBytesByUser = s.parseSSHSessions(ctx)
+	} else {
+		logPath := "/var/log/xray/access.log"
+		var err error
+		ipsByUser, err = s.parseAccessLog(logPath, 180) // 3 minute window
+		if err != nil {
+			s.logger.Warn().Err(err).Msg("failed to parse access log")
+		}
 	}
 
 	var entries []model.MonitorEntry
@@ -166,12 +226,17 @@ func (s *monitorService) GetMonitorEntries(ctx context.Context, protocol string)
 			continue // Skip users with no active connections
 		}
 
+		usedBytes := account.UsedBytes
+		if protocol == "ssh" && sshBytesByUser != nil && sshBytesByUser[account.Username] > 0 {
+			usedBytes = sshBytesByUser[account.Username]
+		}
+
 		entry := model.MonitorEntry{
 			Username:   account.Username,
 			IPCount:    len(ips),
 			IPLimit:    account.LimitIP,
 			IPs:        ips,
-			UsedBytes:  account.UsedBytes,
+			UsedBytes:  usedBytes,
 			QuotaBytes: account.QuotaBytes,
 			ExpiredAt:  account.ExpiredAt,
 		}

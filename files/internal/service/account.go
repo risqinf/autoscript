@@ -67,15 +67,21 @@ func (s *accountService) getLiveSSHUsage(ctx context.Context, username string) i
 
 	var result struct {
 		Success bool `json:"success"`
-		Data    map[string]struct {
-			TotalBytes int64 `json:"total_bytes"`
+		Data    struct {
+			Count int `json:"count"`
+			Users []struct {
+				Username   string `json:"username"`
+				TotalBytes int64  `json:"total_bytes"`
+			} `json:"users"`
 		} `json:"data"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
 		return 0
 	}
-	if u, ok := result.Data[username]; ok {
-		return u.TotalBytes
+	for _, u := range result.Data.Users {
+		if strings.EqualFold(u.Username, username) {
+			return u.TotalBytes
+		}
 	}
 	return 0
 }
@@ -478,8 +484,8 @@ func (s *accountService) addXrayClient(ctx context.Context, protocol, username, 
 		return fmt.Errorf("jq filter failed for tag '%s': %w", tag, err)
 	}
 
-	// Write to temp file
-	tmpFile := s.config.XrayConfig + ".tmp"
+	// Write to temp file (must end in .json for xray to recognize format)
+	tmpFile := strings.TrimSuffix(s.config.XrayConfig, ".json") + ".tmp.json"
 	if err := os.WriteFile(tmpFile, output, 0644); err != nil {
 		return fmt.Errorf("write temp file: %w", err)
 	}
@@ -537,8 +543,8 @@ func (s *accountService) removeXrayClient(ctx context.Context, protocol, usernam
 		return nil
 	}
 
-	// Write to temp file
-	tmpFile := s.config.XrayConfig + ".tmp"
+	// Write to temp file (must end in .json for xray to recognize format)
+	tmpFile := strings.TrimSuffix(s.config.XrayConfig, ".json") + ".tmp.json"
 	if err := os.WriteFile(tmpFile, output, 0644); err != nil {
 		return fmt.Errorf("write temp file: %w", err)
 	}
