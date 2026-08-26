@@ -92,6 +92,7 @@ for cmd in menu menu-ssh menu-vless menu-vmess menu-trojan menu-host menu-backup
     loop-quota-vless loop-quota-vmess loop-quota-trojan \
     quota-vless quota-vmess quota-trojan \
     xp-ssh xp-vless xp-vmess xp-trojan \
+    install-api uninstall-api \
     backup restore fixlog versi-xray stream-check change-domain change-dns change-timezone status set-telegram uninstall; do
     rm -f "/usr/local/sbin/$cmd"
 done

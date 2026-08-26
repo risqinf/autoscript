@@ -22,7 +22,7 @@ LIGHT='\033[0;37m'
 print_header() {
   clear
   echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
-  echo -e "${PURPLE}         ◎ ENTERPRISE VPN AUTOSCRIPT INSTALLER ◎            ${NC}"
+  echo -e "${PURPLE}           ENTERPRISE VPN AUTOSCRIPT INSTALLER              ${NC}"
   echo -e "${PURPLE}                    version ${AS_VERSION}                     ${NC}"
   echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
 }
@@ -177,16 +177,16 @@ print_success "Backup password saved to /etc/xray/backup.pass (chmod 600)."
 sleep 1
 
 print_info "Updating system repositories..."
-dnf install epel-release -y >/dev/null 2>&1
-dnf makecache >/dev/null 2>&1
+dnf install epel-release -y
+dnf makecache
 
 print_info "Installing core dependencies..."
-dnf install wget curl openssl sudo binutils coreutils gnupg2 bc vnstat htop lsof jq sqlite tar gzip python3 ruby rubygems -y >/dev/null 2>&1
-gem install lolcat >/dev/null 2>&1
+dnf install wget curl openssl sudo binutils coreutils gnupg2 bc vnstat htop lsof jq sqlite tar gzip python3 ruby rubygems -y
+gem install lolcat
 # Start the vnStat daemon so its database is created (the menu reads bandwidth
 # via vnstat; without the daemon it errors "Failed to open database").
-systemctl enable vnstat --now >/dev/null 2>&1
-systemctl restart vnstat >/dev/null 2>&1
+systemctl enable vnstat --now
+systemctl restart vnstat
 print_success "Core packages installed."
 
 # Fix DNS
@@ -223,12 +223,12 @@ print_success "nologin shell registered."
 # login-checker scripts (which read /var/log/secure) and the ssh-ws auth-log
 # monitor get no data. Dropbear logs via syslog (authpriv) once -E is dropped.
 print_info "Configuring rsyslog for /var/log/secure..."
-dnf install rsyslog -y >/dev/null 2>&1
+dnf install rsyslog -y
 if ! grep -rqs 'authpriv\.\*' /etc/rsyslog.conf /etc/rsyslog.d/ 2>/dev/null; then
   echo 'authpriv.*    /var/log/secure' >/etc/rsyslog.d/00-autoscript-secure.conf
 fi
-systemctl enable rsyslog --now >/dev/null 2>&1
-systemctl restart rsyslog >/dev/null 2>&1
+systemctl enable rsyslog --now
+systemctl restart rsyslog
 print_success "rsyslog active (authpriv -> /var/log/secure)."
 
 # Make A Directory
@@ -248,19 +248,19 @@ REPO_TARBALL="https://github.com/${REPO_OWNER}/${REPO_NAME}/archive/refs/heads/$
 
 menu_install_logic() {
   print_info "Downloading management menu..."
-  dnf install tar gzip -y >/dev/null 2>&1
+  dnf install tar gzip -y
 
   local tmpdir
   tmpdir=$(mktemp -d)
   wget -qO "$tmpdir/repo.tar.gz" "$REPO_TARBALL"
-  tar -xzf "$tmpdir/repo.tar.gz" -C "$tmpdir" >/dev/null 2>&1
+  tar -xzf "$tmpdir/repo.tar.gz" -C "$tmpdir"
 
   local srcdir="$tmpdir/${REPO_NAME}-${REPO_BRANCH}"
 
   # Install shared libraries into /usr/local/sbin/lib (sourced, not commands).
   mkdir -p /usr/local/sbin/lib
   if [[ -d "$srcdir/scripts/lib" ]]; then
-    install -m 0644 "$srcdir/scripts/lib/"*.sh /usr/local/sbin/lib/ 2>/dev/null
+    install -m 0644 "$srcdir/scripts/lib/"*.sh /usr/local/sbin/lib/
   fi
 
   # Install command scripts (strip .sh) into /usr/local/sbin so they are
@@ -278,7 +278,9 @@ menu_install_logic() {
     install -m 0755 "$file" "/usr/local/sbin/api/$name"
   done
 
-  # Install the uninstaller as a callable command.
+  # Install the API & Uninstaller helper commands
+  [[ -f "$srcdir/install-api.sh" ]] && install -m 0755 "$srcdir/install-api.sh" /usr/local/sbin/install-api
+  [[ -f "$srcdir/uninstall-api.sh" ]] && install -m 0755 "$srcdir/uninstall-api.sh" /usr/local/sbin/uninstall-api
   [[ -f "$srcdir/uninstall.sh" ]] && install -m 0755 "$srcdir/uninstall.sh" /usr/local/sbin/uninstall
 
   rm -rf "$tmpdir"
@@ -1263,100 +1265,50 @@ done
 api_server_install_logic() {
   print_info "Building and installing API server..."
 
-  # Check if Go is installed
-  if ! command -v go &>/dev/null; then
-    print_info "Installing Go..."
-    dnf install -y golang >/dev/null 2>&1
+  local script_dir; script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+  if [[ -f "$script_dir/install-api.sh" ]]; then
+    bash "$script_dir/install-api.sh"
+    return $?
   fi
 
-  # Build API server
-  API_DIR="$(dirname "$0")/files"
+  # Fallback manual install
+  if ! command -v go &>/dev/null; then
+    print_info "Installing Go..."
+    dnf install -y golang
+  fi
+
+  API_DIR="${script_dir}/files"
   if [[ ! -d "$API_DIR" ]]; then
     print_error "API source directory not found: $API_DIR"
     return 1
   fi
 
-  # Detect system resources for resource-limited compilation
-  local cpu_cores=$(nproc 2>/dev/null || echo 1)
-  local ram_mb=$(awk '/MemTotal/ {print int($2/1024)}' /proc/meminfo 2>/dev/null || echo 1024)
-
-  # Calculate build limits based on available resources
-  local gomaxprocs gogc build_parallel
-  if ((ram_mb <= 512)); then
-    gomaxprocs=1
-    gogc=30
-    build_parallel=1
-    print_info "Low RAM (${ram_mb}MB): minimal build settings"
-  elif ((ram_mb <= 1024)); then
-    gomaxprocs=1
-    gogc=50
-    build_parallel=1
-    print_info "Standard RAM (${ram_mb}MB): balanced build settings"
-  elif ((ram_mb <= 2048)); then
-    gomaxprocs=$((cpu_cores > 2 ? 2 : cpu_cores))
-    gogc=75
-    build_parallel=2
-    print_info "Good RAM (${ram_mb}MB): faster build settings"
-  else
-    gomaxprocs=$cpu_cores
-    gogc=100
-    build_parallel=$cpu_cores
-    print_info "High RAM (${ram_mb}MB): maximum build settings"
-  fi
-
-  # Check swap
-  local swap_mb=$(free -m | awk '/Swap/ {print $2}' 2>/dev/null || echo 0)
-  ((swap_mb > 0)) && print_info "Swap available: ${swap_mb}MB"
-
   cd "$API_DIR"
-  print_info "Downloading Go dependencies..."
-  go mod tidy >/dev/null 2>&1
-
-  print_info "Compiling API server (GOMAXPROCS=$gomaxprocs, GOGC=$gogc, -p $build_parallel)..."
-  export GOMAXPROCS=$gomaxprocs
-  export GOGC=$gogc
+  go mod tidy
 
   CGO_ENABLED=0 go build \
-    -p $build_parallel \
     -ldflags="-s -w" \
     -o /usr/local/bin/api-server \
-    ./cmd/server
+    ./cmd/server/main.go
 
-  if [[ ! -f "/usr/local/bin/api-server" ]]; then
-    print_error "API server build failed!"
-    print_error "If OOM, add swap: fallocate -l 1G /swapfile && chmod 600 /swapfile && mkswap /swapfile && swapon /swapfile"
-    return 1
-  fi
   chmod +x /usr/local/bin/api-server
-  print_ok "API server binary installed"
+  ln -sf /usr/local/bin/api-server /usr/local/bin/autoscript-api
 
-  # Create API database directory
   mkdir -p /etc/api
   chmod 700 /etc/api
 
-  # Install systemd service
   cp "$API_DIR/api-server.service" /etc/systemd/system/api-server.service
   chmod 644 /etc/systemd/system/api-server.service
   systemctl daemon-reload
+  systemctl enable api-server --now
 
-  # Enable and start service
-  systemctl enable api-server --now >/dev/null 2>&1
-  sleep 2
-
-  if systemctl is-active --quiet api-server; then
-    print_ok "API server is running on 127.0.0.1:9000"
-
-    # Get the default token
-    TOKEN=$(journalctl -u api-server --no-pager -n 50 | grep "default API token created" | tail -1 | awk -F': ' '{print $NF}')
-    if [[ -n "$TOKEN" ]]; then
-      echo ""
-      echo -e "${GREEN}=== API SERVER TOKEN ===${NC}"
-      echo -e "${BLUE}Token:${NC} $TOKEN"
-      echo ""
-      print_info "Save this token for API requests"
-    fi
-  else
-    print_warn "API server failed to start. Check: journalctl -u api-server"
+  local token; token=$(sqlite3 /etc/api/api.db "SELECT token FROM tokens LIMIT 1;" 2>/dev/null || true)
+  [[ -z "$token" && -f /etc/api/key ]] && token=$(cat /etc/api/key)
+  if [[ -n "$token" ]]; then
+    echo ""
+    echo -e "${GREEN}=== API SERVER TOKEN ===${NC}"
+    echo -e "${BLUE}Token:${NC} $token"
+    echo ""
   fi
 }
 

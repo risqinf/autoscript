@@ -1,0 +1,254 @@
+name: Release Autoscript & API
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Tag to release (e.g. v1.0.0)'
+        required: true
+        type: string
+      prerelease:
+        description: 'Mark as pre-release?'
+        required: false
+        default: 'false'
+        type: choice
+        options:
+          - 'false'
+          - 'true'
+      draft:
+        description: 'Save as draft?'
+        required: false
+        default: 'false'
+        type: choice
+        options:
+          - 'false'
+          - 'true'
+
+env:
+  APP_NAME: autoscript-api
+  GO_VERSION: '1.22'
+
+permissions:
+  contents: write
+
+jobs:
+  # ───────────────────────────────────────────────────────────────────────────
+  #  1 · Prepare
+  # ───────────────────────────────────────────────────────────────────────────
+  prepare:
+    name: Prepare
+    runs-on: ubuntu-latest
+    outputs:
+      tag:           ${{ steps.meta.outputs.tag }}
+      version:       ${{ steps.meta.outputs.version }}
+      is_prerelease: ${{ steps.meta.outputs.is_prerelease }}
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Extract metadata
+        id: meta
+        run: |
+          if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+            TAG="${{ github.event.inputs.tag }}"
+          else
+            TAG="${{ github.ref_name }}"
+          fi
+
+          VERSION="${TAG#v}"
+
+          IS_PRE="false"
+          if [[ "$TAG" =~ -(alpha|beta|rc|dev|pre) ]]; then
+            IS_PRE="true"
+          fi
+          if [[ "${{ github.event.inputs.prerelease }}" == "true" ]]; then
+            IS_PRE="true"
+          fi
+
+          echo "tag=${TAG}"             >> "$GITHUB_OUTPUT"
+          echo "version=${VERSION}"     >> "$GITHUB_OUTPUT"
+          echo "is_prerelease=${IS_PRE}" >> "$GITHUB_OUTPUT"
+
+          echo "Tag     : ${TAG}"
+          echo "Version : ${VERSION}"
+          echo "Pre-rel : ${IS_PRE}"
+
+      - name: Generate changelog file
+        id: changelog
+        run: |
+          TAG="${{ steps.meta.outputs.tag }}"
+          PREV=$(git tag --sort=-version:refname | grep -v "^${TAG}$" | head -1 || true)
+
+          {
+            echo "## Autoscript Release ${TAG}"
+            echo ""
+            echo "### What is Included"
+            echo "- Autoscript VPN Core (Xray, SSH-WS, Dropbear, HAProxy, Nginx, SQLite)"
+            echo "- RESTful API Server Binary (\`autoscript-api\` / \`api-server\` for Linux amd64, arm64, armv7)"
+            echo "- Live Session & Quota Tracking (1:1 SSH and Xray stats)"
+            echo ""
+            echo "### Commits & Changes"
+            if [[ -n "$PREV" ]]; then
+              echo "Changes since **${PREV}**:"
+              echo ""
+              git log --pretty=format:"* %s ([%h](https://github.com/${{ github.repository }}/commit/%H))" "${PREV}..HEAD" || true
+            else
+              echo "Initial release changes:"
+              echo ""
+              git log --pretty=format:"* %s ([%h](https://github.com/${{ github.repository }}/commit/%H))" -n 25 || true
+            fi
+            echo ""
+            echo "---"
+            echo "### Installation & Update"
+            echo "\`\`\`bash"
+            echo "# Run Installer"
+            echo "curl -fsSL https://raw.githubusercontent.com/${{ github.repository }}/main/install.sh | bash"
+            echo ""
+            echo "# API Installation"
+            echo "curl -fsSL https://raw.githubusercontent.com/${{ github.repository }}/main/install-api.sh | bash"
+            echo "\`\`\`"
+          } > release-body.md
+
+          mkdir -p release-meta
+          cp release-body.md release-meta/release-body.md
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-changelog
+          path: release-meta/release-body.md
+          retention-days: 1
+
+  # ───────────────────────────────────────────────────────────────────────────
+  #  2 · Build API Binary Matrix
+  # ───────────────────────────────────────────────────────────────────────────
+  build:
+    name: Build API (${{ matrix.label }})
+    needs: prepare
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - goos: linux
+            goarch: amd64
+            goarm: ''
+            label: linux-amd64
+          - goos: linux
+            goarch: arm64
+            goarm: ''
+            label: linux-arm64
+          - goos: linux
+            goarch: arm
+            goarm: '7'
+            label: linux-armv7
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: false
+
+      - name: Build Binary
+        id: build
+        env:
+          CGO_ENABLED: 0
+          GOOS:        ${{ matrix.goos }}
+          GOARCH:      ${{ matrix.goarch }}
+          GOARM:       ${{ matrix.goarm }}
+          TAG:         ${{ needs.prepare.outputs.tag }}
+          VER:         ${{ needs.prepare.outputs.version }}
+        run: |
+          cd files
+          go mod tidy
+
+          OUT="${{ env.APP_NAME }}-${TAG}-${{ matrix.label }}"
+          mkdir -p ../dist
+
+          LDFLAGS="-s -w -X main.Version=${TAG}"
+
+          go build \
+            -trimpath \
+            -ldflags "${LDFLAGS}" \
+            -o "../dist/${OUT}" \
+            ./cmd/server/main.go
+
+          echo "output=${OUT}" >> "$GITHUB_OUTPUT"
+          ls -lh "../dist/${OUT}"
+
+      - name: Checksum & Archive
+        id: archive
+        run: |
+          cd dist
+          OUT="${{ steps.build.outputs.output }}"
+          sha256sum "${OUT}" | tee "${OUT}.sha256"
+
+          ARCH="${OUT}.tar.gz"
+          tar -czf "${ARCH}" "${OUT}" "${OUT}.sha256"
+          
+          echo "archive=${ARCH}" >> "$GITHUB_OUTPUT"
+          ls -lh "${ARCH}"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-${{ matrix.label }}
+          path: |
+            dist/${{ steps.archive.outputs.archive }}
+            dist/${{ steps.build.outputs.output }}.sha256
+          retention-days: 1
+
+  # ───────────────────────────────────────────────────────────────────────────
+  #  3 · Publish Release
+  # ───────────────────────────────────────────────────────────────────────────
+  release:
+    name: Publish Release
+    needs: [prepare, build]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: release-*
+          path: release-assets
+          merge-multiple: true
+
+      - name: Merge Checksums
+        run: |
+          find release-assets -name "*.sha256" -exec cat {} \; \
+            | sort > release-assets/checksums.txt
+          cat release-assets/checksums.txt
+
+      - name: Publish with GitHub CLI
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG:          ${{ needs.prepare.outputs.tag }}
+          IS_PRE:       ${{ needs.prepare.outputs.is_prerelease }}
+          IS_DRAFT:     ${{ github.event.inputs.draft == 'true' }}
+        run: |
+          FLAGS=""
+          [[ "$IS_PRE"   == "true" ]] && FLAGS="${FLAGS} --prerelease"
+          [[ "$IS_DRAFT" == "true" ]] && FLAGS="${FLAGS} --draft"
+          [[ "$IS_PRE"   != "true" ]] && FLAGS="${FLAGS} --latest"
+
+          if gh release view "${TAG}" >/dev/null 2>&1; then
+            echo "Release ${TAG} already exists. Updating notes and uploading assets..."
+            gh release edit "${TAG}" --notes-file release-assets/release-body.md $FLAGS || true
+            gh release upload "${TAG}" \
+              release-assets/*.tar.gz \
+              release-assets/checksums.txt \
+              --clobber
+          else
+            gh release create "${TAG}" \
+              --title "Autoscript & API ${TAG}" \
+              --notes-file release-assets/release-body.md \
+              $FLAGS \
+              release-assets/*.tar.gz \
+              release-assets/checksums.txt
+          fi

@@ -1,7 +1,8 @@
-#!/bin/bash
+#!/usr/bin/env bash
 # ========================================================
 # Project: Autoscript VPN by risqinf
-# Description: Build and install API server
+# Description: Enterprise RESTful API Server Installer & Builder
+# Developed for Rocky Linux 9 / Enterprise Linux
 # License: Apache License 2.0 (see LICENSE file)
 # Repository: https://github.com/risqinf/autoscript
 # ========================================================
@@ -13,184 +14,200 @@ RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[0;33m'
 BLUE='\033[0;34m'
+CYAN='\033[0;36m'
 NC='\033[0m'
+BOLD='\033[1m'
 
 print_ok() { echo -e "${GREEN}[OK]${NC} $1"; }
 print_info() { echo -e "${BLUE}[INFO]${NC} $1"; }
 print_warn() { echo -e "${YELLOW}[WARN]${NC} $1"; }
 print_error() { echo -e "${RED}[ERROR]${NC} $1"; }
 
+clear
+echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+echo -e "${GREEN}${BOLD}           AUTOSCRIPT RESTful API INSTALLER                 ${NC}"
+echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+echo ""
+
 # Check if running as root
-if [ "$EUID" -ne 0 ]; then
+if [[ $EUID -ne 0 ]]; then
     print_error "This script must be run as root!"
     exit 1
 fi
 
-# Check if Go is installed
-if ! command -v go &>/dev/null; then
-    print_info "Installing Go..."
-    dnf install -y golang >/dev/null 2>&1 || {
-        print_error "Failed to install Go"
-        exit 1
-    }
-    print_ok "Go installed"
-fi
-
-# Get Go version
-GO_VERSION=$(go version | awk '{print $3}')
-print_info "Go version: $GO_VERSION"
-
 # Set paths
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 API_DIR="$SCRIPT_DIR/files"
-BINARY_NAME="api-server"
-INSTALL_PATH="/usr/local/bin/$BINARY_NAME"
+INSTALL_PATH="/usr/local/bin/api-server"
 SERVICE_FILE="/etc/systemd/system/api-server.service"
 API_DB_DIR="/etc/api"
 API_DB_PATH="$API_DB_DIR/api.db"
 MAIN_DB_PATH="/etc/xray/xray.db"
 
-# Check if main database exists
-if [ ! -f "$MAIN_DB_PATH" ]; then
-    print_error "Main database not found: $MAIN_DB_PATH"
-    print_error "Please run the main installer first"
-    exit 1
-fi
+# Install necessary runtime dependencies
+print_info "Checking system utilities..."
+dnf install -y sqlite tar gzip curl wget openssl
 
-# Detect system resources for resource-limited compilation
-CPU_CORES=$(nproc 2>/dev/null || echo 1)
-RAM_MB=$(awk '/MemTotal/ {print int($2/1024)}' /proc/meminfo 2>/dev/null || echo 1024)
-
-# Calculate build limits based on available resources
-# Goal: compile successfully on 512MB-1GB VPS without OOM
-if (( RAM_MB <= 512 )); then
-    # Very low RAM: single thread, aggressive GC, minimal parallelism
-    GOMAXPROCS=1
-    GOGC=30
-    BUILD_PARALLEL=1
-    BUILD_TAGS=""
-    print_info "Low RAM detected (${RAM_MB}MB): using minimal build settings"
-elif (( RAM_MB <= 1024 )); then
-    # 1GB RAM: single thread, moderate GC
-    GOMAXPROCS=1
-    GOGC=50
-    BUILD_PARALLEL=1
-    BUILD_TAGS=""
-    print_info "Standard RAM detected (${RAM_MB}MB): using balanced build settings"
-elif (( RAM_MB <= 2048 )); then
-    # 2GB RAM: can use 2 cores
-    GOMAXPROCS=$((CPU_CORES > 2 ? 2 : CPU_CORES))
-    GOGC=75
-    BUILD_PARALLEL=2
-    BUILD_TAGS=""
-    print_info "Good RAM detected (${RAM_MB}MB): using faster build settings"
-else
-    # 4GB+: use all cores
-    GOMAXPROCS=$CPU_CORES
-    GOGC=100
-    BUILD_PARALLEL=$CPU_CORES
-    BUILD_TAGS=""
-    print_info "High RAM detected (${RAM_MB}MB): using maximum build settings"
-fi
-
-# Check swap availability
-SWAP_MB=$(free -m | awk '/Swap/ {print $2}' 2>/dev/null || echo 0)
-if (( SWAP_MB > 0 )); then
-    print_info "Swap available: ${SWAP_MB}MB"
-else
-    print_warn "No swap detected - build may fail on low RAM"
-fi
-
-# Build API server
-print_info "Building API server..."
-cd "$API_DIR"
-
-# Download dependencies
-print_info "Downloading dependencies..."
-go mod tidy >/dev/null 2>&1
-
-# Build binary with resource limits
-print_info "Compiling binary (GOMAXPROCS=$GOMAXPROCS, GOGC=$GOGC, -p $BUILD_PARALLEL)..."
-export GOMAXPROCS=$GOMAXPROCS
-export GOGC=$GOGC
-
-# Use -p to limit parallel compilation, -ldflags to reduce binary size
-CGO_ENABLED=0 go build \
-    -p $BUILD_PARALLEL \
-    -ldflags="-s -w" \
-    -o "$INSTALL_PATH" \
-    ./cmd/server
-
-if [ ! -f "$INSTALL_PATH" ]; then
-    print_error "Build failed!"
-    print_error "If OOM, try: dnf install -y epel-release && dnf install -y zram-generator-defaults"
-    exit 1
-fi
-
-chmod +x "$INSTALL_PATH"
-print_ok "Binary built and installed: $INSTALL_PATH"
-
-# Create API database directory
-print_info "Creating API database directory..."
+# Ensure API directory exists
 mkdir -p "$API_DB_DIR"
 chmod 700 "$API_DB_DIR"
-print_ok "API directory created: $API_DB_DIR"
+
+# Copy helper scripts to /usr/local/sbin
+if [[ -f "$SCRIPT_DIR/install-api.sh" ]]; then
+    install -m 0755 "$SCRIPT_DIR/install-api.sh" /usr/local/sbin/install-api
+fi
+if [[ -f "$SCRIPT_DIR/uninstall-api.sh" ]]; then
+    install -m 0755 "$SCRIPT_DIR/uninstall-api.sh" /usr/local/sbin/uninstall-api
+fi
+
+# Detect architecture
+ARCH="$(uname -m)"
+BINARY_INSTALLED=0
+
+# Try compiling from source if Go is available or can be installed
+if [[ -d "$API_DIR" && -f "$API_DIR/go.mod" ]]; then
+    print_info "Source directory detected at $API_DIR"
+    
+    if ! command -v go &>/dev/null; then
+        print_info "Installing Go compiler..."
+        dnf install -y golang || print_warn "Failed to install Go via dnf."
+    fi
+
+    if command -v go &>/dev/null; then
+        GO_VERSION=$(go version | awk '{print $3}')
+        print_info "Go compiler ready: $GO_VERSION"
+
+        # Detect system resources for resource-limited compilation
+        CPU_CORES=$(nproc 2>/dev/null || echo 1)
+        RAM_MB=$(awk '/MemTotal/ {print int($2/1024)}' /proc/meminfo 2>/dev/null || echo 1024)
+
+        if (( RAM_MB <= 512 )); then
+            GOMAXPROCS=1
+            GOGC=30
+            BUILD_PARALLEL=1
+        elif (( RAM_MB <= 1024 )); then
+            GOMAXPROCS=1
+            GOGC=50
+            BUILD_PARALLEL=1
+        elif (( RAM_MB <= 2048 )); then
+            GOMAXPROCS=$((CPU_CORES > 2 ? 2 : CPU_CORES))
+            GOGC=75
+            BUILD_PARALLEL=2
+        else
+            GOMAXPROCS=$CPU_CORES
+            GOGC=100
+            BUILD_PARALLEL=$CPU_CORES
+        fi
+
+        print_info "Compiling API server (GOMAXPROCS=$GOMAXPROCS, GOGC=$GOGC, -p $BUILD_PARALLEL)..."
+        export GOMAXPROCS=$GOMAXPROCS
+        export GOGC=$GOGC
+
+        cd "$API_DIR"
+        go mod tidy
+
+        CGO_ENABLED=0 go build \
+            -p $BUILD_PARALLEL \
+            -ldflags="-s -w" \
+            -o "$INSTALL_PATH" \
+            ./cmd/server/main.go
+
+        if [[ -f "$INSTALL_PATH" ]]; then
+            chmod +x "$INSTALL_PATH"
+            # Link also as autoscript-api
+            ln -sf "$INSTALL_PATH" /usr/local/bin/autoscript-api
+            BINARY_INSTALLED=1
+            print_ok "API binary compiled and installed: $INSTALL_PATH"
+        fi
+    fi
+fi
+
+if [[ $BINARY_INSTALLED -eq 0 && ! -f "$INSTALL_PATH" ]]; then
+    print_error "Failed to build or download api-server binary."
+    exit 1
+fi
 
 # Install systemd service
 print_info "Installing systemd service..."
-cp "$API_DIR/api-server.service" "$SERVICE_FILE"
+cat >"$SERVICE_FILE" <<'EOF'
+[Unit]
+Description=Autoscript VPN API Server
+After=network.target xray.service dropbear.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/root
+Environment=API_PORT=9000
+Environment=API_HOST=127.0.0.1
+Environment=API_DB_PATH=/etc/api/api.db
+Environment=MAIN_DB_PATH=/etc/xray/xray.db
+Environment=XRAY_CONFIG=/etc/xray/config.json
+Environment=XRAY_BIN=/usr/local/bin/xray
+ExecStart=/usr/local/bin/api-server
+Restart=always
+RestartSec=5s
+LimitNOFILE=65535
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
 chmod 644 "$SERVICE_FILE"
 systemctl daemon-reload
-print_ok "Systemd service installed"
+print_ok "Systemd service configured: $SERVICE_FILE"
+
+# Ensure Token Exists in SQLite
+print_info "Checking API authentication tokens..."
+EXISTING_TOKEN=$(sqlite3 "$API_DB_PATH" "SELECT token FROM tokens ORDER BY id DESC LIMIT 1;" 2>/dev/null || true)
+if [[ -z "$EXISTING_TOKEN" ]]; then
+    if [[ -f /etc/api/key ]]; then
+        EXISTING_TOKEN=$(head -n 1 /etc/api/key | tr -d '\r\n')
+    else
+        EXISTING_TOKEN=$(openssl rand -hex 32 2>/dev/null || tr -dc 'a-f0-9' </dev/urandom | head -c 64)
+    fi
+    sqlite3 "$API_DB_PATH" "CREATE TABLE IF NOT EXISTS tokens (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      name TEXT NOT NULL,
+      token TEXT NOT NULL UNIQUE,
+      created_at INTEGER NOT NULL DEFAULT (strftime('%s','now')),
+      last_used INTEGER NOT NULL DEFAULT 0
+    );" 2>/dev/null || true
+    sqlite3 "$API_DB_PATH" "INSERT INTO tokens (name, token, created_at) VALUES ('default', '$EXISTING_TOKEN', strftime('%s','now'));" 2>/dev/null || true
+    echo "$EXISTING_TOKEN" > /etc/api/key
+    chmod 600 /etc/api/key
+fi
 
 # Enable and start service
-print_info "Starting API server..."
-systemctl enable api-server --now >/dev/null 2>&1
+print_info "Starting API server service..."
+systemctl enable api-server --now
+sleep 1
 
-# Wait for service to start
-sleep 2
-
-# Check if service is running
+# Verify service
 if systemctl is-active --quiet api-server; then
-    print_ok "API server is running"
+    print_ok "API server is running actively!"
 else
-    print_warn "API server failed to start, checking logs..."
-    journalctl -u api-server --no-pager -n 20
-    exit 1
+    print_warn "API server service did not start immediately. Checking logs:"
+    journalctl -u api-server --no-pager -n 15 || true
 fi
 
-# Get the default token from logs
-print_info "Retrieving API token..."
-TOKEN=$(journalctl -u api-server --no-pager -n 50 | grep "default API token created" | tail -1 | awk -F': ' '{print $NF}')
-
-if [ -n "$TOKEN" ]; then
-    print_ok "API token generated"
-    echo ""
-    echo -e "${GREEN}=== API SERVER INSTALLED ===${NC}"
-    echo -e "${BLUE}Endpoint:${NC} http://127.0.0.1:9000"
-    echo -e "${BLUE}Token:${NC}    $TOKEN"
-    echo ""
-    echo -e "${YELLOW}Save this token! You'll need it for API requests.${NC}"
-    echo ""
-else
-    print_warn "Could not retrieve token from logs"
-    print_info "Check: journalctl -u api-server"
-fi
-
-# Test health endpoint
-print_info "Testing health endpoint..."
-HEALTH=$(curl -s http://127.0.0.1:9000/api/health 2>/dev/null)
-if echo "$HEALTH" | grep -q '"success":true'; then
-    print_ok "Health check passed"
-else
-    print_warn "Health check failed (this is normal if nginx/haproxy not configured yet)"
-fi
+# Display summary
+DOMAIN="127.0.0.1"
+[[ -f /etc/xray/domain ]] && DOMAIN=$(cat /etc/xray/domain)
 
 echo ""
-print_ok "API server installation complete!"
-echo ""
-echo -e "${BLUE}Usage:${NC}"
-echo "  curl -H 'Authorization: Bearer <token>' http://127.0.0.1:9000/api/status"
-echo ""
-echo -e "${BLUE}Documentation:${NC} files/README.md"
+echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+echo -e "${GREEN}${BOLD}           API SERVER INSTALLATION SUCCESSFUL!              ${NC}"
+echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+echo -e " ${WHITE}Endpoint Local${NC}  : ${CYAN}http://127.0.0.1:9000${NC}"
+echo -e " ${WHITE}Endpoint Public${NC} : ${CYAN}https://${DOMAIN}${NC}"
+echo -e " ${WHITE}Health Check${NC}    : ${CYAN}https://${DOMAIN}/api/health${NC}"
+echo -e " ${YELLOW}Active Bearer Token:${NC}"
+echo -e " ${GREEN}${BOLD}${EXISTING_TOKEN}${NC}"
+echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+echo -e " ${WHITE}Quick Commands:${NC}"
+echo -e "   - Open API Menu    : ${CYAN}menu-api${NC}"
+echo -e "   - Restart API      : ${CYAN}systemctl restart api-server${NC}"
+echo -e "   - Uninstall API    : ${CYAN}uninstall-api${NC}"
 echo ""
