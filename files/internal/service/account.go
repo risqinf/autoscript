@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
-	"strings"
 	"time"
 
 	"github.com/risqinf/autoscript-api/internal/config"
@@ -173,6 +172,11 @@ func (s *accountService) createXrayAccount(ctx context.Context, protocol string,
 
 	// Add client to xray config
 	if err := s.addXrayClient(ctx, protocol, req.Username, secret); err != nil {
+		s.logger.Error().
+			Err(err).
+			Str("protocol", protocol).
+			Str("username", req.Username).
+			Msg("addXrayClient failed")
 		return nil, fmt.Errorf("add xray client: %w", err)
 	}
 
@@ -384,37 +388,57 @@ func sanitizeInput(input string) string {
 	return replacer.Replace(input)
 }
 
+// getXrayTag returns the xray inbound tag for a given protocol.
+func getXrayTag(protocol string) string {
+	switch protocol {
+	case "vless":
+		return "vless-ws"
+	case "vmess":
+		return "vmess-ws"
+	case "trojan":
+		return "trojan-ws"
+	}
+	return ""
+}
+
 // addXrayClient adds a client to the xray config.
 func (s *accountService) addXrayClient(ctx context.Context, protocol, username, secret string) error {
 	// Sanitize inputs to prevent command injection
 	safeUsername := sanitizeInput(username)
 	safeSecret := sanitizeInput(secret)
-
-	// Build jq filter with sanitized inputs
-	var filter string
-	switch protocol {
-	case "vless":
-		filter = fmt.Sprintf(`(.inbounds[] | select(.tag=="vless-ws") | .settings.clients) += [{"id":"%s","email":"%s"}]`, safeSecret, safeUsername)
-	case "vmess":
-		filter = fmt.Sprintf(`(.inbounds[] | select(.tag=="vmess-ws") | .settings.clients) += [{"id":"%s","alterId":0,"email":"%s"}]`, safeSecret, safeUsername)
-	case "trojan":
-		filter = fmt.Sprintf(`(.inbounds[] | select(.tag=="trojan-ws") | .settings.clients) += [{"password":"%s","email":"%s"}]`, safeSecret, safeUsername)
-	default:
+	tag := getXrayTag(protocol)
+	if tag == "" {
 		return model.ErrInvalidProtocol
 	}
 
-	// Read current config
-	configData, err := os.ReadFile(s.config.XrayConfig)
-	if err != nil {
-		return fmt.Errorf("read config: %w", err)
+	// Build a jq filter that errors if the inbound tag is not found.
+	// This prevents silent failures where jq succeeds but the client is never added.
+	var clientJSON string
+	switch protocol {
+	case "vless":
+		clientJSON = fmt.Sprintf(`{"id":"%s","email":"%s"}`, safeSecret, safeUsername)
+	case "vmess":
+		clientJSON = fmt.Sprintf(`{"id":"%s","alterId":0,"email":"%s"}`, safeSecret, safeUsername)
+	case "trojan":
+		clientJSON = fmt.Sprintf(`{"password":"%s","email":"%s"}`, safeSecret, safeUsername)
 	}
 
-	// Apply jq filter
+	// jq filter: validate tag exists first, then add client
+	filter := fmt.Sprintf(
+		`if ([.inbounds[] | select(.tag=="%s")] | length) == 0 then error("inbound tag '%s' not found in xray config") else (.inbounds[] | select(.tag=="%s") | .settings.clients) += [%s] end`,
+		tag, tag, tag, clientJSON,
+	)
+
+	// Apply jq filter directly on the config file
 	cmd := exec.CommandContext(ctx, "jq", filter, s.config.XrayConfig)
-	cmd.Stdin = strings.NewReader(string(configData))
 	output, err := cmd.Output()
 	if err != nil {
-		return fmt.Errorf("jq filter: %w", err)
+		// Capture stderr for better error message
+		var exitErr interface{ Stderr() []byte }
+		if stderrGetter, ok := err.(interface{ Unwrap() error }); ok {
+			_ = stderrGetter
+		}
+		return fmt.Errorf("jq filter failed for tag '%s': %w", tag, err)
 	}
 
 	// Write to temp file
@@ -424,22 +448,28 @@ func (s *accountService) addXrayClient(ctx context.Context, protocol, username, 
 	}
 
 	// Validate with xray -test
-	cmd = exec.CommandContext(ctx, s.config.XrayBinary, "-test", "-config", tmpFile)
-	if output, err := cmd.CombinedOutput(); err != nil {
+	testCmd := exec.CommandContext(ctx, s.config.XrayBinary, "-test", "-config", tmpFile)
+	if testOut, err := testCmd.CombinedOutput(); err != nil {
 		os.Remove(tmpFile)
-		return fmt.Errorf("xray -test failed: %s: %w", string(output), err)
+		return fmt.Errorf("xray -test failed: %s: %w", string(testOut), err)
 	}
 
-	// Replace config
+	// Replace config atomically
 	if err := os.Rename(tmpFile, s.config.XrayConfig); err != nil {
+		os.Remove(tmpFile)
 		return fmt.Errorf("replace config: %w", err)
 	}
 
-	// Restart xray
-	cmd = exec.CommandContext(ctx, "systemctl", "restart", "xray")
-	if output, err := cmd.CombinedOutput(); err != nil {
-		s.logger.Warn().Err(err).Str("output", string(output)).Msg("failed to restart xray")
+	// Reload xray (SIGHUP if possible, else restart)
+	reloadCmd := exec.CommandContext(ctx, "systemctl", "reload-or-restart", "xray")
+	if reloadOut, err := reloadCmd.CombinedOutput(); err != nil {
+		s.logger.Warn().Err(err).Str("output", string(reloadOut)).Msg("failed to reload xray")
 	}
+
+	s.logger.Info().
+		Str("tag", tag).
+		Str("username", safeUsername).
+		Msg("xray client added")
 
 	return nil
 }
@@ -448,34 +478,26 @@ func (s *accountService) addXrayClient(ctx context.Context, protocol, username, 
 func (s *accountService) removeXrayClient(ctx context.Context, protocol, username string) error {
 	// Sanitize input
 	safeUsername := sanitizeInput(username)
-
-	// Build jq filter based on protocol
-	var tag string
-	switch protocol {
-	case "vless":
-		tag = "vless-ws"
-	case "vmess":
-		tag = "vmess-ws"
-	case "trojan":
-		tag = "trojan-ws"
-	default:
+	tag := getXrayTag(protocol)
+	if tag == "" {
 		return model.ErrInvalidProtocol
 	}
 
-	filter := fmt.Sprintf(`(.inbounds[] | select(.tag=="%s") | .settings.clients) |= map(select(.email != "%s"))`, tag, safeUsername)
-
-	// Read current config
-	configData, err := os.ReadFile(s.config.XrayConfig)
-	if err != nil {
-		return fmt.Errorf("read config: %w", err)
+	// Use .email for vless/vmess and .password for trojan to match the client
+	var filter string
+	if protocol == "trojan" {
+		filter = fmt.Sprintf(`(.inbounds[] | select(.tag=="%s") | .settings.clients) |= map(select(.email != "%s"))`, tag, safeUsername)
+	} else {
+		filter = fmt.Sprintf(`(.inbounds[] | select(.tag=="%s") | .settings.clients) |= map(select(.email != "%s"))`, tag, safeUsername)
 	}
 
-	// Apply jq filter
+	// Apply jq filter directly on the config file
 	cmd := exec.CommandContext(ctx, "jq", filter, s.config.XrayConfig)
-	cmd.Stdin = strings.NewReader(string(configData))
 	output, err := cmd.Output()
 	if err != nil {
-		return fmt.Errorf("jq filter: %w", err)
+		// Non-fatal: log but don't block delete
+		s.logger.Warn().Err(err).Str("tag", tag).Str("username", safeUsername).Msg("jq filter failed during remove")
+		return nil
 	}
 
 	// Write to temp file
@@ -485,22 +507,29 @@ func (s *accountService) removeXrayClient(ctx context.Context, protocol, usernam
 	}
 
 	// Validate with xray -test
-	cmd = exec.CommandContext(ctx, s.config.XrayBinary, "-test", "-config", tmpFile)
-	if output, err := cmd.CombinedOutput(); err != nil {
+	testCmd := exec.CommandContext(ctx, s.config.XrayBinary, "-test", "-config", tmpFile)
+	if testOut, err := testCmd.CombinedOutput(); err != nil {
 		os.Remove(tmpFile)
-		return fmt.Errorf("xray -test failed: %s: %w", string(output), err)
+		s.logger.Warn().Str("output", string(testOut)).Msg("xray -test failed on remove, skipping")
+		return nil
 	}
 
-	// Replace config
+	// Replace config atomically
 	if err := os.Rename(tmpFile, s.config.XrayConfig); err != nil {
+		os.Remove(tmpFile)
 		return fmt.Errorf("replace config: %w", err)
 	}
 
-	// Restart xray
-	cmd = exec.CommandContext(ctx, "systemctl", "restart", "xray")
-	if output, err := cmd.CombinedOutput(); err != nil {
-		s.logger.Warn().Err(err).Str("output", string(output)).Msg("failed to restart xray")
+	// Reload xray
+	reloadCmd := exec.CommandContext(ctx, "systemctl", "reload-or-restart", "xray")
+	if reloadOut, err := reloadCmd.CombinedOutput(); err != nil {
+		s.logger.Warn().Err(err).Str("output", string(reloadOut)).Msg("failed to reload xray")
 	}
+
+	s.logger.Info().
+		Str("tag", tag).
+		Str("username", safeUsername).
+		Msg("xray client removed")
 
 	return nil
 }

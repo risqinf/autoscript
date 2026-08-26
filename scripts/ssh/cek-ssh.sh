@@ -15,32 +15,39 @@
 
 db_init
 
-WSLOG="/var/log/ssh-ws.log"
-if   [ -e /var/log/secure ];   then SECLOG=/var/log/secure
-elif [ -e /var/log/auth.log ]; then SECLOG=/var/log/auth.log
-else SECLOG=""
-fi
-
 # --- 1) proxy-port -> username map (last auth per port wins) ---
 declare -A PORT2USER
-if [[ -n "$SECLOG" ]]; then
-  while read -r port user; do
-    [[ -n "$port" && -n "$user" ]] && PORT2USER[$port]="$user"
-  done < <(
-    awk '
-      /dropbear\[/ && /Password auth succeeded/ {
-        f=$NF; n=split(f,a,":"); port=a[n]; u="";
-        for(i=1;i<=NF;i++){ if($i ~ /^\047.*\047$/){ u=$i; gsub(/\047/,"",u) } }
-        if(port ~ /^[0-9]+$/ && u!="") print port, u
-      }
-      /sshd\[/ && /Accepted / {
-        u=""; port="";
-        for(i=1;i<=NF;i++){ if($i=="for") u=$(i+1); if($i=="port") port=$(i+1) }
-        if(port ~ /^[0-9]+$/ && u!="") print port, u
-      }
-    ' "$SECLOG" 2>/dev/null
-  )
-fi
+
+WSLOG="/var/log/ssh-ws.log"
+
+get_auth_logs() {
+  if [[ -f /var/log/secure ]]; then
+    cat /var/log/secure 2>/dev/null
+  elif [[ -f /var/log/auth.log ]]; then
+    cat /var/log/auth.log 2>/dev/null
+  fi
+  # Fallback to journalctl if systemd is used (catches dropbear & sshd)
+  if command -v journalctl >/dev/null 2>&1; then
+    journalctl -u dropbear -u ssh -u sshd --since "1 day ago" --no-pager 2>/dev/null
+  fi
+}
+
+while read -r port user; do
+  [[ -n "$port" && -n "$user" ]] && PORT2USER[$port]="$user"
+done < <(
+  get_auth_logs | awk '
+    /dropbear\[/ && /Password auth succeeded/ {
+      f=$NF; n=split(f,a,":"); port=a[n]; u="";
+      for(i=1;i<=NF;i++){ if($i ~ /^\047.*\047$/){ u=$i; gsub(/\047/,"",u) } }
+      if(port ~ /^[0-9]+$/ && u!="") print port, u
+    }
+    /sshd\[/ && /Accepted / {
+      u=""; port="";
+      for(i=1;i<=NF;i++){ if($i=="for") u=$(i+1); if($i=="port") port=$(i+1) }
+      if(port ~ /^[0-9]+$/ && u!="") print port, u
+    }
+  ' 2>/dev/null
+)
 
 # --- 2) ssh-ws.log -> per session: proxyport|clientip|tx|rx|total|up|timestamp ---
 # Robust parser: strips ANSI color codes and matches [CONNECT]/[MONITOR]
@@ -107,13 +114,6 @@ if [[ -f "$WSLOG" ]]; then
 fi
 
 # --- 3) decide which proxy-ports are ACTIVE right now ---------------------
-# A session is active if it has a fresh [MONITOR] heartbeat or a recent
-# [CONNECT] entry in ssh-ws.log.  ssh-ws writes MONITOR every ~10s so a
-# 45 s window is safe even if one tick is delayed.
-#
-# ss-detected ports are deliberately NOT added — they include TIME_WAIT
-# sockets from already-closed sessions which would appear as ghost entries
-# with no bandwidth/uptime data.
 LIVE_WINDOW=45   # seconds
 now_epoch=$(date +%s)
 declare -A ACTIVEPORT
@@ -126,6 +126,29 @@ for pport in "${!S_PORT[@]}"; do
     ACTIVEPORT[$pport]=1
   fi
 done
+
+# --- 4) FALLBACK: jika ssh-ws.log tidak ada atau tidak ada sesi aktif,
+#    deteksi koneksi live dari ss (socket) + PORT2USER dari auth log.
+#    Ini menangani sesi Dropbear direct (non-WebSocket).
+if [[ ${#ACTIVEPORT[@]} -eq 0 ]]; then
+  # Ambil semua port lokal yang sedang terhubung ke dropbear:109
+  while IFS= read -r line; do
+    # Format ss output: "ESTAB  0  0  127.0.0.1:44382  127.0.0.1:109"
+    # Kita ambil source port (port yang terhubung ke dropbear)
+    src_port=$(echo "$line" | awk '{print $5}' | awk -F: '{print $NF}')
+    [[ "$src_port" =~ ^[0-9]+$ ]] && ACTIVEPORT[$src_port]=1
+  done < <(ss -tn state established '( dport = :109 )' 2>/dev/null | tail -n +2)
+
+  # Jika masih kosong, coba port dropbear yang berbeda
+  if [[ ${#ACTIVEPORT[@]} -eq 0 ]]; then
+    DROPBEAR_PORT=$(systemctl cat dropbear 2>/dev/null | grep -oP '(?<=-p )\d+' | head -1)
+    DROPBEAR_PORT=${DROPBEAR_PORT:-109}
+    while IFS= read -r line; do
+      src_port=$(echo "$line" | awk '{print $5}' | awk -F: '{print $NF}')
+      [[ "$src_port" =~ ^[0-9]+$ ]] && ACTIVEPORT[$src_port]=1
+    done < <(ss -tn state established "( dport = :${DROPBEAR_PORT} )" 2>/dev/null | tail -n +2)
+  fi
+fi
 
 clear
 ui_header "SSH LIVE SESSION MONITOR"
@@ -181,3 +204,4 @@ echo -e " Total live sessions : ${GREEN}${total_live}${NC}"
 ui_foot
 ui_back
 menu
+
