@@ -173,7 +173,7 @@ func (r *apiRepository) GetRequestCount(ctx context.Context, ip string, window i
 
 // IncrementRequestCount records a request from an IP.
 func (r *apiRepository) IncrementRequestCount(ctx context.Context, ip string) error {
-	query := `INSERT INTO rate_limits (ip, timestamp) VALUES (?, strftime('%s','now'))`
+	query := `INSERT OR IGNORE INTO rate_limits (ip, timestamp) VALUES (?, strftime('%s','now'))`
 	_, err := r.db.ExecContext(ctx, query, ip)
 	if err != nil {
 		return fmt.Errorf("increment request count: %w", err)

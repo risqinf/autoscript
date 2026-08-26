@@ -113,8 +113,17 @@ func (r *accountRepository) SecretInUse(ctx context.Context, secret string) (boo
 // Create inserts a new account.
 func (r *accountRepository) Create(ctx context.Context, account *model.Account) error {
 	query := `
-		INSERT INTO accounts (protocol, username, secret, quota_bytes, limit_ip, expired_at, status)
-		VALUES (?, ?, ?, ?, ?, ?, ?)
+		INSERT INTO accounts (protocol, username, secret, quota_bytes, limit_ip, expired_at, status, created_at, updated_at, note)
+		VALUES (?, ?, ?, ?, ?, ?, ?, strftime('%s','now'), strftime('%s','now'), '')
+		ON CONFLICT(protocol, username) DO UPDATE SET
+			secret = excluded.secret,
+			quota_bytes = excluded.quota_bytes,
+			used_bytes = 0,
+			limit_ip = excluded.limit_ip,
+			expired_at = excluded.expired_at,
+			status = excluded.status,
+			updated_at = excluded.updated_at,
+			note = ''
 	`
 
 	_, err := r.db.ExecContext(ctx, query,
