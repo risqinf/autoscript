@@ -16,46 +16,64 @@
 db_init
 
 # --- 1) proxy-port -> username map (last auth per port wins) ---
-declare -A PORT2USER
+declare -A PORT2USER PORT2IP PORT2PID
 
 WSLOG="/var/log/ssh-ws.log"
 
 get_auth_logs() {
-  if [[ -f /var/log/secure ]]; then
+  if [[ -f /var/log/secure && -s /var/log/secure ]]; then
     cat /var/log/secure 2>/dev/null
-  elif [[ -f /var/log/auth.log ]]; then
+  elif [[ -f /var/log/auth.log && -s /var/log/auth.log ]]; then
     cat /var/log/auth.log 2>/dev/null
-  fi
-  # Fallback to journalctl if systemd is used (catches dropbear & sshd)
-  if command -v journalctl >/dev/null 2>&1; then
+  elif command -v journalctl >/dev/null 2>&1; then
     journalctl -u dropbear -u ssh -u sshd --since "1 day ago" --no-pager 2>/dev/null
   fi
 }
 
-while read -r port user; do
-  [[ -n "$port" && -n "$user" ]] && PORT2USER[$port]="$user"
+while read -r port user ip pid; do
+  if [[ -n "$port" && -n "$user" ]]; then
+    PORT2USER[$port]="$user"
+    PORT2IP[$port]="$ip"
+    PORT2PID[$port]="$pid"
+  fi
 done < <(
   get_auth_logs | awk '
     /dropbear\[/ && /Password auth succeeded/ {
-      f=$NF; n=split(f,a,":"); port=a[n]; u="";
+      pid=$0; sub(/.*dropbear\[/,"",pid); sub(/\].*/,"",pid);
+      f=$NF; n=split(f,a,":"); ip=a[1]; port=a[2]; u="";
       for(i=1;i<=NF;i++){ if($i ~ /^\047.*\047$/){ u=$i; gsub(/\047/,"",u) } }
-      if(port ~ /^[0-9]+$/ && u!="") print port, u
+      if(port ~ /^[0-9]+$/ && u!="") print port, u, ip, pid
     }
     /sshd\[/ && /Accepted / {
-      u=""; port="";
-      for(i=1;i<=NF;i++){ if($i=="for") u=$(i+1); if($i=="port") port=$(i+1) }
-      if(port ~ /^[0-9]+$/ && u!="") print port, u
+      pid=$0; sub(/.*sshd\[/,"",pid); sub(/\].*/,"",pid);
+      u=""; port=""; ip="";
+      for(i=1;i<=NF;i++){ if($i=="for") u=$(i+1); if($i=="port") port=$(i+1); if($i=="from") ip=$(i+1) }
+      if(port ~ /^[0-9]+$/ && u!="") print port, u, ip, pid
     }
-  ' 2>/dev/null
+  ' 2>/dev/null | sort -u
 )
 
-# --- 2) ssh-ws.log -> per session: proxyport|clientip|tx|rx|total|up|timestamp ---
-# Robust parser: strips ANSI color codes and matches [CONNECT]/[MONITOR]
-# anywhere on the line, extracting sessionID / client-IP / proxy-port by
-# pattern instead of fixed field positions. This survives colorized logs
-# and minor spacing differences.
-declare -A S_PORT S_CIP S_TX S_RX S_TOT S_UP S_TS
-if [[ -f "$WSLOG" ]]; then
+declare -A S_PORT S_CIP S_TX S_RX S_TOT S_UP S_TS ACTIVEPORT
+
+# --- 2) Try querying ssh-ws HTTP API (port 8081) if available ---
+if command -v curl >/dev/null 2>&1 && command -v jq >/dev/null 2>&1; then
+  ws_json=$(curl -s --connect-timeout 1 http://127.0.0.1:8081/api/sessions 2>/dev/null)
+  if [[ -n "$ws_json" ]]; then
+    while IFS='|' read -r pport cip user up tx rx tot; do
+      [[ -z "$pport" ]] && continue
+      ACTIVEPORT[$pport]=1
+      S_CIP[$pport]="$cip"
+      [[ -n "$user" && "$user" != "detecting..." ]] && PORT2USER[$pport]="$user"
+      S_UP[$pport]="$up"
+      S_TX[$pport]="$tx"
+      S_RX[$pport]="$rx"
+      S_TOT[$pport]="$tot"
+    done < <(echo "$ws_json" | jq -r '.data.sessions[]? | "\(.proxy_to_ssh_port)|\(.real_client_ip)|\(.username)|\(.duration)|\(.tx_formatted)|\(.rx_formatted)|\(.total_formatted)"' 2>/dev/null)
+  fi
+fi
+
+# --- 3) Parse ssh-ws.log if API returned no active sessions ---
+if [[ ${#ACTIVEPORT[@]} -eq 0 && -f "$WSLOG" ]]; then
   while IFS='|' read -r pport cip tx rx tot up ts; do
     [[ -z "$pport" ]] && continue
     S_PORT[$pport]=1
@@ -63,21 +81,19 @@ if [[ -f "$WSLOG" ]]; then
     S_TOT[$pport]="$tot"; S_UP[$pport]="$up"; S_TS[$pport]="$ts"
   done < <(
     awk '
-      # session id = first [token] on the line that is not the tag itself
-      function sid_from_line(   i,t){
+      function sid_from_line(i,t){
         for(i=1;i<=NF;i++){
           t=$i;
           if(t ~ /^\[/ && t !~ /CONNECT/ && t !~ /MONITOR/){ gsub(/[][]/,"",t); return t }
         }
         return "";
       }
-      # client ip = first IPv4:port token on the line (the real client)
-      function client_ip(   i){
+      function client_ip(i){
         for(i=1;i<=NF;i++){ if($i ~ /^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+:[0-9]+$/) return $i }
         return "";
       }
       {
-        line=$0; gsub(/\033\[[0-9;]*m/,"",line); $0=line;   # strip ANSI, re-split
+        line=$0; gsub(/\033\[[0-9;]*m/,"",line); $0=line;
       }
       /\[CONNECT\]/ && /proxy-port:/ {
         s=sid_from_line(); if(s==""){ next }
@@ -87,7 +103,7 @@ if [[ -f "$WSLOG" ]]; then
         next;
       }
       /\[MONITOR\]/ {
-        s=sid_from_line(); if(s==""){ next }   # skips "Active sessions: N" summary
+        s=sid_from_line(); if(s==""){ next }
         tx=""; rx=""; tot=""; upv="";
         for(i=1;i<=NF;i++){
           if($i ~ /^up:/)    upv=substr($i,4);
@@ -111,43 +127,41 @@ if [[ -f "$WSLOG" ]]; then
       }
     ' "$WSLOG" 2>/dev/null
   )
+
+  LIVE_WINDOW=120
+  now_epoch=$(date +%s)
+  for pport in "${!S_PORT[@]}"; do
+    ts="${S_TS[$pport]}"
+    [[ -z "$ts" ]] && continue
+    e=$(date -d "$ts" +%s 2>/dev/null) || continue
+    [[ -z "$e" ]] && continue
+    if (( now_epoch - e <= LIVE_WINDOW )); then
+      ACTIVEPORT[$pport]=1
+    fi
+  done
 fi
 
-# --- 3) decide which proxy-ports are ACTIVE right now ---------------------
-LIVE_WINDOW=45   # seconds
-now_epoch=$(date +%s)
-declare -A ACTIVEPORT
-for pport in "${!S_PORT[@]}"; do
-  ts="${S_TS[$pport]}"
-  [[ -z "$ts" ]] && continue
-  e=$(date -d "$ts" +%s 2>/dev/null) || continue
-  [[ -z "$e" ]] && continue
-  if (( now_epoch - e <= LIVE_WINDOW )); then
-    ACTIVEPORT[$pport]=1
-  fi
-done
-
-# --- 4) FALLBACK: jika ssh-ws.log tidak ada atau tidak ada sesi aktif,
+# --- 4) FALLBACK: jika ssh-ws.log / API tidak ada atau tidak ada sesi aktif,
 #    deteksi koneksi live dari ss (socket) + PORT2USER dari auth log.
-#    Ini menangani sesi Dropbear direct (non-WebSocket).
 if [[ ${#ACTIVEPORT[@]} -eq 0 ]]; then
-  # Ambil semua port lokal yang sedang terhubung ke dropbear:109
-  while IFS= read -r line; do
-    # Format ss output: "ESTAB  0  0  127.0.0.1:44382  127.0.0.1:109"
-    # Kita ambil source port (port yang terhubung ke dropbear)
-    src_port=$(echo "$line" | awk '{print $5}' | awk -F: '{print $NF}')
-    [[ "$src_port" =~ ^[0-9]+$ ]] && ACTIVEPORT[$src_port]=1
-  done < <(ss -tn state established '( dport = :109 )' 2>/dev/null | tail -n +2)
+  DROPBEAR_PORT=$(systemctl cat dropbear 2>/dev/null | grep -oP '(?<=-p )\d+' | head -1)
+  DROPBEAR_PORT=${DROPBEAR_PORT:-109}
 
-  # Jika masih kosong, coba port dropbear yang berbeda
-  if [[ ${#ACTIVEPORT[@]} -eq 0 ]]; then
-    DROPBEAR_PORT=$(systemctl cat dropbear 2>/dev/null | grep -oP '(?<=-p )\d+' | head -1)
-    DROPBEAR_PORT=${DROPBEAR_PORT:-109}
-    while IFS= read -r line; do
-      src_port=$(echo "$line" | awk '{print $5}' | awk -F: '{print $NF}')
-      [[ "$src_port" =~ ^[0-9]+$ ]] && ACTIVEPORT[$src_port]=1
-    done < <(ss -tn state established "( dport = :${DROPBEAR_PORT} )" 2>/dev/null | tail -n +2)
-  fi
+  while IFS= read -r ssline; do
+    src_port=$(echo "$ssline" | awk -v dport="$DROPBEAR_PORT" '{
+      for(i=1;i<=NF;i++){
+        if($i ~ ":"dport"$"){
+          if(i>1 && $(i-1) ~ /^[0-9.]+:[0-9]+$/){
+            n=split($(i-1),a,":"); print a[n]; exit
+          }
+          if(i<NF && $(i+1) ~ /^[0-9.]+:[0-9]+$/){
+            n=split($(i+1),a,":"); print a[n]; exit
+          }
+        }
+      }
+    }')
+    [[ "$src_port" =~ ^[0-9]+$ ]] && ACTIVEPORT[$src_port]=1
+  done < <(ss -tn state established 2>/dev/null | grep ":${DROPBEAR_PORT}$\|:${DROPBEAR_PORT} ")
 fi
 
 clear
@@ -160,16 +174,38 @@ total_live=0
 for pport in "${!ACTIVEPORT[@]}"; do
   user="${PORT2USER[$pport]}"
   [[ -z "$user" ]] && user="(detecting)"
-  cip="${S_CIP[$pport]}"; cip="${cip%%:*}"; [[ -z "$cip" ]] && cip="(detecting)"
-  up="${S_UP[$pport]}";  [[ -z "$up" ]] && up="-"
+  
+  cip="${S_CIP[$pport]}"
+  cip="${cip%%:*}"
+  if [[ -z "$cip" || "$cip" == "(detecting)" ]]; then
+    cip="${PORT2IP[$pport]}"
+    [[ "$cip" == "127.0.0.1" ]] && cip="127.0.0.1 (SSL/Direct)"
+    [[ -z "$cip" ]] && cip="(direct)"
+  fi
+
+  up="${S_UP[$pport]}"
+  if [[ -z "$up" || "$up" == "-" ]]; then
+    cpid="${PORT2PID[$pport]}"
+    if [[ -n "$cpid" && -d "/proc/$cpid" ]]; then
+      up=$(ps -p "$cpid" -o etime= 2>/dev/null | tr -d ' ')
+    fi
+    [[ -z "$up" ]] && up="-"
+  fi
+
   tx="${S_TX[$pport]:--}"; rx="${S_RX[$pport]:--}"; tot="${S_TOT[$pport]:--}"
+  if [[ "$tx" == "-" && "$rx" == "-" ]]; then
+    bw_display="Live (Direct/SSL)"
+  else
+    bw_display="TX ${tx} | RX ${rx} | Total ${tot}"
+  fi
+
   USER_SESS[$user]=$(( ${USER_SESS[$user]:-0} + 1 ))
   total_live=$((total_live+1))
   ui_rule
   ui_kv "Username"  "$user" "$CYAN"
   ui_kv "Client IP" "$cip"
   ui_kv "Uptime"    "$up"
-  ui_kv "Bandwidth" "TX ${tx} | RX ${rx} | Total ${tot}"
+  ui_kv "Bandwidth" "$bw_display"
 done
 
 if [[ $total_live -eq 0 ]]; then

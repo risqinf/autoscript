@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"strings"
 	"time"
 
 	"github.com/risqinf/autoscript-api/internal/config"
@@ -433,10 +434,8 @@ func (s *accountService) addXrayClient(ctx context.Context, protocol, username, 
 	cmd := exec.CommandContext(ctx, "jq", filter, s.config.XrayConfig)
 	output, err := cmd.Output()
 	if err != nil {
-		// Capture stderr for better error message
-		var exitErr interface{ Stderr() []byte }
-		if stderrGetter, ok := err.(interface{ Unwrap() error }); ok {
-			_ = stderrGetter
+		if exitErr, ok := err.(*exec.ExitError); ok {
+			return fmt.Errorf("jq filter failed for tag '%s': %s: %w", tag, string(exitErr.Stderr), err)
 		}
 		return fmt.Errorf("jq filter failed for tag '%s': %w", tag, err)
 	}
