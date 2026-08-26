@@ -4,7 +4,9 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
+	"net/http"
 	"os"
 	"os/exec"
 	"strings"
@@ -50,6 +52,34 @@ func NewAccountService(
 	}
 }
 
+// getLiveSSHUsage fetches real-time traffic statistics from ssh-ws API (port 8081).
+func (s *accountService) getLiveSSHUsage(ctx context.Context, username string) int64 {
+	client := &http.Client{Timeout: 800 * time.Millisecond}
+	req, err := http.NewRequestWithContext(ctx, "GET", "http://127.0.0.1:8081/api/users", nil)
+	if err != nil {
+		return 0
+	}
+	resp, err := client.Do(req)
+	if err != nil {
+		return 0
+	}
+	defer resp.Body.Close()
+
+	var result struct {
+		Success bool `json:"success"`
+		Data    map[string]struct {
+			TotalBytes int64 `json:"total_bytes"`
+		} `json:"data"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return 0
+	}
+	if u, ok := result.Data[username]; ok {
+		return u.TotalBytes
+	}
+	return 0
+}
+
 // GetAccount retrieves an account by protocol and username.
 func (s *accountService) GetAccount(ctx context.Context, protocol, username string) (*model.Account, error) {
 	account, err := s.repo.GetByUsername(ctx, protocol, username)
@@ -59,6 +89,14 @@ func (s *accountService) GetAccount(ctx context.Context, protocol, username stri
 	if account == nil {
 		return nil, model.ErrAccountNotFound
 	}
+
+	// For SSH, query real-time live usage from ssh-ws proxy
+	if protocol == "ssh" {
+		if liveBytes := s.getLiveSSHUsage(ctx, username); liveBytes > 0 {
+			account.UsedBytes = liveBytes
+		}
+	}
+
 	return account, nil
 }
 
