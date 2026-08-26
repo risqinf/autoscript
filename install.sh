@@ -428,7 +428,7 @@ rm -fr dropbear*
 # Static Go binary (CGO_ENABLED=0) — runs natively on Rocky Linux 9.
 # Tuned for EL9: auth log = /var/log/secure (not Debian's /var/log/auth.log),
 # runs as root (EL9 has no 'adm' group on /var/log/secure).
-SSHWS_VERSION="v1.3.0"
+SSHWS_VERSION="v1.3.1"
 sshws_install_logic() {
   print_info "Installing SSH-WebSocket proxy (GO-TUNNEL PRO ${SSHWS_VERSION})..."
 
