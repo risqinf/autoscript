@@ -30,39 +30,39 @@ files/
 ## API Endpoints
 
 ### Health
-- `GET /api/v1/health` - Health check (no auth)
+- `GET /api/health` - Health check (no auth)
 
 ### Accounts
-- `POST /api/v1/accounts/{protocol}` - Create account
-- `GET /api/v1/accounts/{protocol}` - List accounts
-- `GET /api/v1/accounts/{protocol}/{username}` - Get account
-- `PUT /api/v1/accounts/{protocol}/{username}` - Update account
-- `DELETE /api/v1/accounts/{protocol}/{username}` - Delete account
-- `POST /api/v1/accounts/{protocol}/{username}/renew` - Renew account
-- `POST /api/v1/accounts/{protocol}/{username}/recovery` - Recover account
+- `POST /api/accounts/{protocol}` - Create account
+- `GET /api/accounts/{protocol}` - List accounts
+- `GET /api/accounts/{protocol}/{username}` - Get account
+- `PUT /api/accounts/{protocol}/{username}` - Update account
+- `DELETE /api/accounts/{protocol}/{username}` - Delete account
+- `POST /api/accounts/{protocol}/{username}/renew` - Renew account
+- `POST /api/accounts/{protocol}/{username}/recovery` - Recover account
 
 ### Trials
-- `POST /api/v1/trials/{protocol}` - Create trial account
+- `POST /api/trials/{protocol}` - Create trial account
 
 ### Config
-- `GET /api/v1/config/{protocol}/{username}` - Get config link
-- `GET /api/v1/config/openvpn/{username}` - Download .ovpn file
+- `GET /api/config/{protocol}/{username}` - Get config link
+- `GET /api/config/openvpn/{username}` - Download .ovpn file
 
 ### Monitoring
-- `GET /api/v1/status` - Service status
-- `GET /api/v1/monitor/{protocol}` - Login monitor
-- `GET /api/v1/bandwidth` - Bandwidth stats
+- `GET /api/status` - Service status
+- `GET /api/monitor/{protocol}` - Login monitor
+- `GET /api/bandwidth` - Bandwidth stats
 
 ### System
-- `GET /api/v1/system/info` - System information
-- `GET /api/v1/system/services` - Service list
+- `GET /api/system/info` - System information
+- `GET /api/system/services` - Service list
 
 ## Authentication
 
-All endpoints (except `/api/v1/health`) require Bearer token authentication:
+All endpoints (except `/api/health`) require Bearer token authentication:
 
 ```bash
-curl -H "Authorization: Bearer <token>" https://domain/api/v1/accounts/ssh
+curl -H "Authorization: Bearer <token>" https://domain/api/accounts/ssh
 ```
 
 ## Response Format

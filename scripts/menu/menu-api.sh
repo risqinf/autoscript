@@ -38,9 +38,9 @@ generate() {
   # Hindari duplikat, tambahkan hanya jika belum ada
   grep -qxF "$newkey" /etc/api/key 2>/dev/null || echo "$newkey" >> /etc/api/key
   systemctl daemon-reload
-  systemctl enable server.service
-  systemctl start server.service
-  systemctl restart server.service
+  systemctl enable api-server.service
+  systemctl start api-server.service
+  systemctl restart api-server.service
   mds=$(cat /etc/api/key)
   clear
   echo -e "${GREEN}${BOLD}[OK] Success Generate New Key${NC}"
@@ -59,9 +59,9 @@ manual() {
   loading "${YELLOW}Adding Token"
   echo $token >> /etc/api/key
   systemctl daemon-reload
-  systemctl enable server.service
-  systemctl start server.service
-  systemctl restart server.service
+  systemctl enable api-server.service
+  systemctl start api-server.service
+  systemctl restart api-server.service
   mds=$(cat /etc/api/key)
   clear
   echo -e "${GREEN}${BOLD}[OK] Success Add New Key API${NC}"
@@ -80,9 +80,9 @@ enable() {
   clear
   loading "${YELLOW}Enabling API"
   systemctl daemon-reload
-  systemctl enable server.service
-  systemctl start server.service
-  systemctl restart server.service
+  systemctl enable api-server.service
+  systemctl start api-server.service
+  systemctl restart api-server.service
   clear
   echo -e "${GREEN}${BOLD}[OK] Done Enable API${NC}"
   read -n 1 -s -r -p "Press any key to return to menu..."
@@ -91,9 +91,9 @@ enable() {
 restart() {
   loading "${YELLOW}Restarting API"
   systemctl daemon-reload
-  systemctl enable server.service
-  systemctl start server.service
-  systemctl restart server.service
+  systemctl enable api-server.service
+  systemctl start api-server.service
+  systemctl restart api-server.service
   clear
   echo -e "${GREEN}${BOLD}[OK] Done Restarting API${NC}"
   read -n 1 -s -r -p "Press any key to return to menu..."
@@ -101,8 +101,8 @@ restart() {
 
 disable() {
   loading "${RED}Disabling API"
-  systemctl stop server.service
-  systemctl disable server.service
+  systemctl stop api-server.service
+  systemctl disable api-server.service
   clear
   echo -e "${RED}${BOLD}[X] Success Disable API${NC}"
   read -n 1 -s -r -p "Press any key to return to menu..."
@@ -114,7 +114,7 @@ detail() {
 
   while true; do
     clear
-    edust_service=$(systemctl is-active server.service 2>/dev/null)
+    edust_service=$(systemctl is-active api-server.service 2>/dev/null)
     if [[ $edust_service == "active" ]]; then
       proxy1="${GREEN}ONLINE${NC}"
     else
@@ -126,9 +126,9 @@ detail() {
     echo -e " Domain : ${CYAN}${domain}${NC}"
     ui_rule
     echo -e " Endpoints :"
-    echo -e "   http(s)://${domain}/api/path"
-    echo -e "   http(s)://${domain}/vps/path"
-    echo -e "   http://${domain}:9000/api/path"
+    echo -e "   http(s)://${domain}/api/accounts/ssh"
+    echo -e "   http(s)://${domain}/api/health"
+    echo -e "   http://${domain}:9000/api/status"
     ui_rule
     ui_opt 1 "Generate New Key Token"
     ui_opt 2 "Change Manual Key Token (edit file)"

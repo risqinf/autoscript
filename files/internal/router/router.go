@@ -40,7 +40,7 @@ func chainMiddleware(handler fasthttp.RequestHandler, middlewares ...func(fastht
 // RegisterAccountRoutes registers account-related routes.
 func (r *Router) RegisterAccountRoutes(h *handler.AccountHandler) {
 	// Public routes (no auth)
-	r.router.GET("/api/v1/health", h.Health)
+	r.router.GET("/api/health", h.Health)
 
 	// Protected routes (with auth)
 	protected := func(handler fasthttp.RequestHandler) fasthttp.RequestHandler {
@@ -48,20 +48,20 @@ func (r *Router) RegisterAccountRoutes(h *handler.AccountHandler) {
 	}
 
 	// Accounts
-	r.router.POST("/api/v1/accounts/{protocol}", protected(h.Create))
-	r.router.GET("/api/v1/accounts/{protocol}", protected(h.List))
-	r.router.GET("/api/v1/accounts/{protocol}/{username}", protected(h.Get))
-	r.router.PUT("/api/v1/accounts/{protocol}/{username}", protected(h.Update))
-	r.router.DELETE("/api/v1/accounts/{protocol}/{username}", protected(h.Delete))
-	r.router.POST("/api/v1/accounts/{protocol}/{username}/renew", protected(h.Renew))
-	r.router.POST("/api/v1/accounts/{protocol}/{username}/recovery", protected(h.Recover))
+	r.router.POST("/api/accounts/{protocol}", protected(h.Create))
+	r.router.GET("/api/accounts/{protocol}", protected(h.List))
+	r.router.GET("/api/accounts/{protocol}/{username}", protected(h.Get))
+	r.router.PUT("/api/accounts/{protocol}/{username}", protected(h.Update))
+	r.router.DELETE("/api/accounts/{protocol}/{username}", protected(h.Delete))
+	r.router.POST("/api/accounts/{protocol}/{username}/renew", protected(h.Renew))
+	r.router.POST("/api/accounts/{protocol}/{username}/recovery", protected(h.Recover))
 
 	// Trials
-	r.router.POST("/api/v1/trials/{protocol}", protected(h.CreateTrial))
+	r.router.POST("/api/trials/{protocol}", protected(h.CreateTrial))
 
 	// Config
-	r.router.GET("/api/v1/config/{protocol}/{username}", protected(h.GetConfig))
-	r.router.GET("/api/v1/config/openvpn/{username}", protected(h.GetOpenVPNConfig))
+	r.router.GET("/api/config/{protocol}/{username}", protected(h.GetConfig))
+	r.router.GET("/api/config/openvpn/{username}", protected(h.GetOpenVPNConfig))
 }
 
 // RegisterMonitorRoutes registers monitoring routes.
@@ -70,9 +70,9 @@ func (r *Router) RegisterMonitorRoutes(h *handler.MonitorHandler) {
 		return chainMiddleware(handler, r.loggerMw.Handle, r.authMw.Handle)
 	}
 
-	r.router.GET("/api/v1/status", protected(h.Status))
-	r.router.GET("/api/v1/monitor/{protocol}", protected(h.Monitor))
-	r.router.GET("/api/v1/bandwidth", protected(h.Bandwidth))
+	r.router.GET("/api/status", protected(h.Status))
+	r.router.GET("/api/monitor/{protocol}", protected(h.Monitor))
+	r.router.GET("/api/bandwidth", protected(h.Bandwidth))
 }
 
 // RegisterSystemRoutes registers system routes.
@@ -81,8 +81,8 @@ func (r *Router) RegisterSystemRoutes(h *handler.SystemHandler) {
 		return chainMiddleware(handler, r.loggerMw.Handle, r.authMw.Handle)
 	}
 
-	r.router.GET("/api/v1/system/info", protected(h.Info))
-	r.router.GET("/api/v1/system/services", protected(h.Services))
+	r.router.GET("/api/system/info", protected(h.Info))
+	r.router.GET("/api/system/services", protected(h.Services))
 }
 
 // Server creates a fasthttp.Server.

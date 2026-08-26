@@ -179,7 +179,7 @@ fi
 
 # Test health endpoint
 print_info "Testing health endpoint..."
-HEALTH=$(curl -s http://127.0.0.1:9000/api/v1/health 2>/dev/null)
+HEALTH=$(curl -s http://127.0.0.1:9000/api/health 2>/dev/null)
 if echo "$HEALTH" | grep -q '"success":true'; then
     print_ok "Health check passed"
 else
@@ -190,7 +190,7 @@ echo ""
 print_ok "API server installation complete!"
 echo ""
 echo -e "${BLUE}Usage:${NC}"
-echo "  curl -H 'Authorization: Bearer <token>' http://127.0.0.1:9000/api/v1/status"
+echo "  curl -H 'Authorization: Bearer <token>' http://127.0.0.1:9000/api/status"
 echo ""
 echo -e "${BLUE}Documentation:${NC} files/README.md"
 echo ""
