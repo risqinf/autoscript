@@ -18,21 +18,23 @@ menu_ssh() {
     ui_opt 6 "Check Config / Details"
     ui_opt 7 "Recovery Account"
     ui_opt 8 "Check Login (live)"
-    ui_opt 9 "Change Dropbear Version"
+    ui_opt 9  "Change Dropbear Version"
+    ui_opt 10 "Change WS Banner  (/etc/issue.net)"
     ui_rule
-    ui_opt 0 "Back to Main Menu"
+    ui_opt 0  "Back to Main Menu"
     ui_foot
     read -rp " Select option : " opt
     case "$opt" in
-        1) add-ssh ;;
-        2) trial-ssh ;;
-        3) delete-ssh ;;
-        4) renew-ssh ;;
-        5) list-ssh ;;
-        6) config-ssh ;;
-        7) recovery-ssh ;;
-        8) cek-ssh ;;
-        9) menu-dropbear ;;
+        1)  add-ssh ;;
+        2)  trial-ssh ;;
+        3)  delete-ssh ;;
+        4)  renew-ssh ;;
+        5)  list-ssh ;;
+        6)  config-ssh ;;
+        7)  recovery-ssh ;;
+        8)  cek-ssh ;;
+        9)  menu-dropbear ;;
+        10) change-banner ;;
         0|x|X) menu ;;
         *) err "Invalid option."; sleep 1; menu_ssh ;;
     esac

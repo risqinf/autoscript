@@ -109,9 +109,16 @@ jobs:
             echo "# Run Installer"
             echo "curl -fsSL https://raw.githubusercontent.com/${{ github.repository }}/main/install.sh | bash"
             echo ""
-            echo "# API Installation"
+            echo "# API Installation (auto-downloads latest binary)"
             echo "curl -fsSL https://raw.githubusercontent.com/${{ github.repository }}/main/install-api.sh | bash"
             echo "\`\`\`"
+            echo ""
+            echo "### Latest Release Binary"
+            echo "| Platform | File |"
+            echo "|----------|------|"
+            echo "| Linux amd64 | \`${{ env.APP_NAME }}-${TAG}-linux-amd64.tar.gz\` |"
+            echo "| Linux arm64 | \`${{ env.APP_NAME }}-${TAG}-linux-arm64.tar.gz\` |"
+            echo "| Linux armv7 | \`${{ env.APP_NAME }}-${TAG}-linux-armv7.tar.gz\` |"
           } > release-body.md
 
           mkdir -p release-meta
@@ -252,3 +259,36 @@ jobs:
               release-assets/*.tar.gz \
               release-assets/checksums.txt
           fi
+
+  # ───────────────────────────────────────────────────────────────────────────
+  #  4 · Update VERSION file in repository
+  # ───────────────────────────────────────────────────────────────────────────
+  update-version:
+    name: Update VERSION
+    needs: [prepare, release]
+    runs-on: ubuntu-latest
+    # Only update VERSION for non-draft, non-prerelease (stable releases)
+    if: ${{ needs.prepare.outputs.is_prerelease == 'false' && github.event.inputs.draft != 'true' }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # Use a PAT or the default token; fetch main branch
+          token: ${{ secrets.GITHUB_TOKEN }}
+          ref: main
+          fetch-depth: 1
+
+      - name: Write VERSION & commit
+        env:
+          TAG: ${{ needs.prepare.outputs.tag }}
+          VERSION: ${{ needs.prepare.outputs.version }}
+          GIT_AUTHOR_NAME: github-actions[bot]
+          GIT_AUTHOR_EMAIL: github-actions[bot]@users.noreply.github.com
+          GIT_COMMITTER_NAME: github-actions[bot]
+          GIT_COMMITTER_EMAIL: github-actions[bot]@users.noreply.github.com
+        run: |
+          echo "${VERSION}" > VERSION
+          git add VERSION
+          git diff --cached --quiet && echo "VERSION unchanged, skipping commit." && exit 0
+          git commit -m "chore: bump VERSION to ${TAG} [skip ci]"
+          git push origin main
+          echo "VERSION updated to ${VERSION} and pushed to main."

@@ -223,6 +223,6 @@ case $mm in
 9) clear ; run_cc ; menu-system ;;
 10) clear ; run_cc ; menu-backup ;;
 x|X) clear ; exit 0 ;;
-00) clear ; run_cc ; nano /etc/issue.net ;;
+00) clear ; run_cc ; change-banner ;;
 *) echo "Invalid option, please try again." ; sleep 1 ; menu ;;
 esac
