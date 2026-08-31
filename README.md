@@ -245,6 +245,14 @@ Thank you to all contributors who help improve AutoScript VPN!
         <sub><b>farelvpn</b></sub>
       </a>
     </td>
+    <td align="center" width="120px">
+      <a href="https://github.com/apps/github-actions">
+        <img src="https://avatars.githubusercontent.com/in/15368?v=4" width="80px;" alt="github-actions[bot]"/><br />
+        <sub><b>github-actions[bot]</b></sub>
+      </a>
+    </td>
+  </tr>
+  <tr>
   </tr>
 </table>
 <!-- ALL-CONTRIBUTORS-LIST:END -->
