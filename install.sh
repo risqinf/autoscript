@@ -1240,7 +1240,7 @@ server {
     }
 
     # XHTTP (SplitHTTP) paths
-    location /vless-xhttp {
+    location ^~ /vless-xhttp {
         proxy_pass http://vless_xhttp;
         proxy_http_version 1.1;
         proxy_set_header Host \$http_host;
@@ -1249,10 +1249,11 @@ server {
         proxy_read_timeout 7d;
         proxy_send_timeout 7d;
         proxy_buffering off;
+        proxy_request_buffering off;
         client_max_body_size 0;
     }
 
-    location /vmess-xhttp {
+    location ^~ /vmess-xhttp {
         proxy_pass http://vmess_xhttp;
         proxy_http_version 1.1;
         proxy_set_header Host \$http_host;
@@ -1261,10 +1262,11 @@ server {
         proxy_read_timeout 7d;
         proxy_send_timeout 7d;
         proxy_buffering off;
+        proxy_request_buffering off;
         client_max_body_size 0;
     }
 
-    location /trojan-xhttp {
+    location ^~ /trojan-xhttp {
         proxy_pass http://trojan_xhttp;
         proxy_http_version 1.1;
         proxy_set_header Host \$http_host;
@@ -1273,6 +1275,7 @@ server {
         proxy_read_timeout 7d;
         proxy_send_timeout 7d;
         proxy_buffering off;
+        proxy_request_buffering off;
         client_max_body_size 0;
     }
 
@@ -1352,11 +1355,13 @@ server {
     }
 }
 
-# Dedicated HTTP/2 server block for gRPC
+# Dedicated HTTP/2 server block for gRPC, XHTTP, and HTTPUpgrade
 server {
-    listen 127.0.0.1:82 default_server proxy_protocol http2;
+    listen 127.0.0.1:82 default_server proxy_protocol;
+    http2 on;
     server_name ${domain};
 
+    # gRPC inbounds
     location ^~ /vless-grpc {
         grpc_pass grpc://127.0.0.1:10031;
         grpc_read_timeout 7d;
@@ -1376,6 +1381,86 @@ server {
         grpc_read_timeout 7d;
         grpc_send_timeout 7d;
         grpc_set_header X-Real-IP \$remote_addr;
+    }
+
+    # XHTTP (SplitHTTP) inbounds over HTTP/2
+    location ^~ /vless-xhttp {
+        proxy_pass http://vless_xhttp;
+        proxy_http_version 1.1;
+        proxy_set_header Host \$http_host;
+        proxy_set_header X-Real-IP \$remote_addr;
+        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+        proxy_read_timeout 7d;
+        proxy_send_timeout 7d;
+        proxy_buffering off;
+        proxy_request_buffering off;
+        client_max_body_size 0;
+    }
+
+    location ^~ /vmess-xhttp {
+        proxy_pass http://vmess_xhttp;
+        proxy_http_version 1.1;
+        proxy_set_header Host \$http_host;
+        proxy_set_header X-Real-IP \$remote_addr;
+        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+        proxy_read_timeout 7d;
+        proxy_send_timeout 7d;
+        proxy_buffering off;
+        proxy_request_buffering off;
+        client_max_body_size 0;
+    }
+
+    location ^~ /trojan-xhttp {
+        proxy_pass http://trojan_xhttp;
+        proxy_http_version 1.1;
+        proxy_set_header Host \$http_host;
+        proxy_set_header X-Real-IP \$remote_addr;
+        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+        proxy_read_timeout 7d;
+        proxy_send_timeout 7d;
+        proxy_buffering off;
+        proxy_request_buffering off;
+        client_max_body_size 0;
+    }
+
+    # HTTPUpgrade inbounds over HTTP/2
+    location ^~ /vless-hu {
+        proxy_pass http://vless_hu;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade \$http_upgrade;
+        proxy_set_header Connection \$connection_upgrade;
+        proxy_set_header Host \$http_host;
+        proxy_set_header X-Real-IP \$remote_addr;
+        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+        proxy_read_timeout 7d;
+        proxy_send_timeout 7d;
+        proxy_buffering off;
+    }
+
+    location ^~ /vmess-hu {
+        proxy_pass http://vmess_hu;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade \$http_upgrade;
+        proxy_set_header Connection \$connection_upgrade;
+        proxy_set_header Host \$http_host;
+        proxy_set_header X-Real-IP \$remote_addr;
+        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+        proxy_read_timeout 7d;
+        proxy_send_timeout 7d;
+        proxy_buffering off;
+    }
+
+    location ^~ /trojan-hu {
+        proxy_pass http://trojan_hu;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade \$http_upgrade;
+        proxy_set_header Connection \$connection_upgrade;
+        proxy_set_header Host \$http_host;
+        proxy_set_header X-Real-IP \$remote_addr;
+        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+        proxy_read_timeout 7d;
+        proxy_send_timeout 7d;
+        proxy_buffering off;
     }
 }
 EOF

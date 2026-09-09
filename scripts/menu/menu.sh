@@ -217,11 +217,11 @@ ui_opt 5 "Auto Bulk Create"
 ui_opt 6 "Account Cleaner"
 ui_opt 7 "User Checker"
 ui_opt 8 "API Menu"
-ui_opt 11 "RDNS Client (Private Tunnel) ${YELLOW}[SOON]${NC}"
 ui_rule
 ui_label "SERVER"
 ui_opt 9  "System Menu"
 ui_opt 10 "Backup / Restore"
+ui_opt 11 "RDNS Client (Private Tunnel) ${YELLOW}[SOON]${NC}"
 ui_opt x  "Exit"
 ui_rule
 ui_kv "Xray" "$xray_version"

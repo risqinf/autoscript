@@ -136,13 +136,13 @@ ui_center() {
 # Section label with SkyNode pill format
 ui_label() { echo -e "  ${PILL_TITLE}[ $1 ]${NC}"; }
 # A numbered menu option row with SkyNode bullet formatting (•1)
-ui_opt() { printf "  ${PINK}(•%2s)${NC} ${WHITE}│${NC} %s\n" "$1" "$2"; }
+ui_opt() { printf "  ${PINK}(•%2s)${NC} ${WHITE}│${NC} %b\n" "$1" "$2"; }
 # Standard "back to menu" prompt used everywhere.
 ui_back() { echo ""; read -n 1 -s -r -p " Press any key to return..."; }
 # Aligned "label : value" row used by all detail/output panels.
 ui_kv() {
   local label="$1" value="$2" vcol="${3:-$GREEN}"
-  printf " ${WHITE}%-12s${NC} ${CYAN}:${NC} ${vcol}%s${NC}\n" "$label" "$value"
+  printf " ${WHITE}%-12s${NC} ${CYAN}:${NC} ${vcol}%b${NC}\n" "$label" "$value"
 }
 # Service status row: name left, colored bracketed badge after a colon.
 ui_status() { printf " ${WHITE}%-12s${NC} ${CYAN}:${NC} %b\n" "$1" "$2"; }
@@ -160,10 +160,9 @@ ssh_stack_badge() {
   local a=0 b=0
   svc_active dropbear && a=1
   svc_active ssh-ws  && b=1
-  if   (( a==1 && b==1 )); then echo -e "${PINK}[${GREEN} ON ${PINK}]${NC}"
-  elif (( a==1 || b==1 )); then echo -e "${PINK}[${YELLOW} WARN ${PINK}]${NC}"
-  else echo -e "${PINK}[${RED} OFF ${PINK}]${NC}"
-  fi
+  if   (( a && b )); then echo -e "${PINK}[${GREEN} ON ${PINK}]${NC}"
+  elif (( a || b )); then echo -e "${PINK}[${YELLOW}WARN${PINK}]${NC}"
+  else                    echo -e "${PINK}[${RED} OFF ${PINK}]${NC}"; fi
 }
 
 # Exact htop-aligned RAM calculation: (MemTotal - MemAvailable)
@@ -189,31 +188,49 @@ get_ram_info() {
   fi
 }
 
-# Accurate instantaneous CPU usage percentage (delta of /proc/stat)
+# Accurate instantaneous CPU usage percentage
 get_cpu_usage() {
-  local u1 n1 s1 i1 w1 x1 y1 z1
-  local u2 n2 s2 i2 w2 x2 y2 z2
-  if [[ ! -r /proc/stat ]]; then
-    top -bn1 2>/dev/null | grep "Cpu(s)" | awk '{print $2"% user"}' || echo "N/A"
-    return
+  local cpu=""
+  if [[ -r /proc/stat ]]; then
+    local l1 l2
+    l1=$(grep '^cpu ' /proc/stat 2>/dev/null)
+    sleep 0.1 2>/dev/null || sleep 1
+    l2=$(grep '^cpu ' /proc/stat 2>/dev/null)
+    if [[ -n "$l1" && -n "$l2" ]]; then
+      cpu=$(awk -v l1="$l1" -v l2="$l2" 'BEGIN {
+        split(l1, a); split(l2, b);
+        tot1=0; for(i=2; i<=8; i++) tot1+=a[i];
+        tot2=0; for(i=2; i<=8; i++) tot2+=b[i];
+        idle1=a[5]+a[6]; idle2=b[5]+b[6];
+        dtot=tot2-tot1; didle=idle2-idle1;
+        if (dtot > 0) {
+          usage = (100 * (dtot - didle)) / dtot;
+          if (usage < 0) usage = 0;
+          if (usage > 100) usage = 100;
+          printf "%d%%", usage;
+        } else {
+          print "0%";
+        }
+      }' 2>/dev/null)
+    fi
   fi
-  read -r _ u1 n1 s1 i1 w1 x1 y1 z1 < /proc/stat
-  sleep 0.08
-  read -r _ u2 n2 s2 i2 w2 x2 y2 z2 < /proc/stat
-  local total1=$((u1 + n1 + s1 + i1 + w1 + x1 + y1 + z1))
-  local total2=$((u2 + n2 + s2 + i2 + w2 + x2 + y2 + z2))
-  local idle1=$((i1 + w1))
-  local idle2=$((i2 + w2))
-  local diff_total=$((total2 - total1))
-  local diff_idle=$((idle2 - idle1))
-  if (( diff_total > 0 )); then
-    local used=$(( (100 * (diff_total - diff_idle)) / diff_total ))
-    (( used < 0 )) && used=0
-    (( used > 100 )) && used=100
-    echo "${used}%"
-  else
-    echo "0%"
+  # Fallback to top if /proc/stat calculation was empty
+  if [[ -z "$cpu" ]]; then
+    cpu=$(top -bn1 2>/dev/null | grep -i "cpu" | head -1 | awk '{
+      for(i=1; i<=NF; i++) {
+        if ($i ~ /%?id/) {
+          val = $(i-1);
+          gsub(/[^0-9.]/, "", val);
+          if (val != "") {
+            printf "%d%%", (100 - val);
+            exit;
+          }
+        }
+      }
+    }' 2>/dev/null)
   fi
+  [[ -z "$cpu" ]] && cpu="0%"
+  echo "$cpu"
 }
 
 # --- Domain / IP ---
