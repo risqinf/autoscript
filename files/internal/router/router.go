@@ -83,6 +83,7 @@ func (r *Router) RegisterSystemRoutes(h *handler.SystemHandler) {
 
 	r.router.GET("/api/system/info", protected(h.Info))
 	r.router.GET("/api/system/services", protected(h.Services))
+	r.router.GET("/api/system/slowdns", protected(h.SlowDNS))
 }
 
 // Server creates a fasthttp.Server.

@@ -22,6 +22,7 @@ import (
 // MonitorService defines the interface for monitoring operations.
 type MonitorService interface {
 	GetServiceStatus(ctx context.Context) ([]model.ServiceStatus, error)
+	GetSlowDNSInfo(ctx context.Context) (*model.SlowDNSStatus, error)
 	GetSystemInfo(ctx context.Context) (*model.SystemInfo, error)
 	GetMonitorEntries(ctx context.Context, protocol string) ([]model.MonitorEntry, error)
 }
@@ -56,6 +57,7 @@ func (s *monitorService) GetServiceStatus(ctx context.Context) ([]model.ServiceS
 		{"sshd", "22, 3303"},
 		{"squid", "3128"},
 		{"openvpn-server@server-tcp-1194", "1194"},
+		{"slowdns", "53, 5300"},
 		{"vnstat", ""},
 		{"rsyslog", ""},
 		{"firewalld", ""},
@@ -79,6 +81,35 @@ func (s *monitorService) GetServiceStatus(ctx context.Context) ([]model.ServiceS
 	}
 
 	return statuses, nil
+}
+
+// GetSlowDNSInfo returns SlowDNS service and key configuration.
+func (s *monitorService) GetSlowDNSInfo(ctx context.Context) (*model.SlowDNSStatus, error) {
+	status := "inactive"
+	cmd := exec.CommandContext(ctx, "systemctl", "is-active", "slowdns")
+	if output, err := cmd.Output(); err == nil {
+		if strings.TrimSpace(string(output)) == "active" {
+			status = "active"
+		}
+	}
+
+	ns := ""
+	if b, err := os.ReadFile("/etc/slowdns/nameserver"); err == nil {
+		ns = strings.TrimSpace(string(b))
+	}
+
+	pub := ""
+	if b, err := os.ReadFile("/etc/slowdns/server.pub"); err == nil {
+		pub = strings.TrimSpace(string(b))
+	}
+
+	return &model.SlowDNSStatus{
+		Status:     status,
+		Nameserver: ns,
+		PublicKey:  pub,
+		Port:       "53 / 5300 UDP",
+		Target:     "127.0.0.1:109 (Dropbear)",
+	}, nil
 }
 
 // GetSystemInfo returns system information.

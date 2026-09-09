@@ -157,6 +157,15 @@ ssh_print_cli() {
   ui_kv "Squid"     "3128"
   ui_kv "BadVPN"    "7300 (UDPGW)"
   ui_kv "OpenVPN"   "1194 (TCP)"
+  if [[ -s /etc/slowdns/server.pub && -s /etc/slowdns/nameserver ]]; then
+    local dns_ns; dns_ns=$(cat /etc/slowdns/nameserver 2>/dev/null | tr -d '\r\n')
+    local dns_pub; dns_pub=$(cat /etc/slowdns/server.pub 2>/dev/null | tr -d '\r\n')
+    if [[ -n "$dns_ns" && -n "$dns_pub" ]]; then
+      ui_rule
+      ui_kv "SlowDNS NS"  "$dns_ns"
+      ui_kv "SlowDNS Pub" "$dns_pub"
+    fi
+  fi
   ui_rule
   echo -e " ${WHITE}Config HTTP Custom :${NC}"
   echo -e " ${GREEN}${d}:1-65535@${user}:${pass}${NC}"
@@ -183,6 +192,17 @@ ssh_tg_text() {
     fi
   fi
   local d; d=$(get_domain); local sip; sip=$(get_ip)
+  local slowdns_tg=""
+  if [[ -s /etc/slowdns/server.pub && -s /etc/slowdns/nameserver ]]; then
+    local dns_ns dns_pub
+    dns_ns=$(cat /etc/slowdns/nameserver 2>/dev/null | tr -d '\r\n')
+    dns_pub=$(cat /etc/slowdns/server.pub 2>/dev/null | tr -d '\r\n')
+    if [[ -n "$dns_ns" && -n "$dns_pub" ]]; then
+      dns_ns=$(html_escape "$dns_ns")
+      dns_pub=$(html_escape "$dns_pub")
+      slowdns_tg=$(printf "\n<b>━━━━━━━━━━━━━━━━━━━━━━━━━━━</b>\n<b>SlowDNS (DNSTT) :</b>\n<b>Nameserver :</b> <code>%s</code>\n<b>Public Key :</b> <code>%s</code>" "$dns_ns" "$dns_pub")
+    fi
+  fi
   cat <<EOF
 <b>━━━━━━━━━━━━━━━━━━━━━━━━━━━</b>
 <b>      ⊹ ${title} ⊹</b>
@@ -200,7 +220,7 @@ ssh_tg_text() {
 <b>Port SSH SSL :</b> <code>443</code>
 <b>Port Squid   :</b> <code>3128</code>
 <b>Port BadVPN  :</b> <code>7300</code>
-<b>Port OpenVPN :</b> <code>1194 (TCP)</code>
+<b>Port OpenVPN :</b> <code>1194 (TCP)</code>${slowdns_tg}
 <b>━━━━━━━━━━━━━━━━━━━━━━━━━━━</b>
 <b>Config HTTP Custom :</b>
 <code>${d}:1-65535@${user}:${pass}</code>

@@ -3,6 +3,36 @@
 All notable changes to this project are documented here.
 This project adheres to [Semantic Versioning](https://semver.org/).
 
+## [4.0.0] - 2026-09-10
+
+Major stable milestone: **Release 4.0.0** (graduating from beta). Integrates SlowDNS (DNSTT) DNS tunneling, full multi-transport Xray routing (WebSocket, HTTPUpgrade, XHTTP, gRPC), unified Go API daemon updates, and end-to-end SSH quota management.
+
+### Added
+- **SlowDNS (DNSTT) Tunnel Server**:
+  - High-performance, lightweight DNS Tunneling daemon via `dnstt-server` (<15MB RAM).
+  - Port binding on `:5300/udp` with non-conflicting firewall redirection (`53/udp -> 5300/udp`) to protect local resolvers.
+  - Direct proxying to Dropbear SSH (`127.0.0.1:109`).
+  - Interactive management panel (`menu-slowdns`) and CLI command (`slowdns`) supporting install, uninstall, service control, nameserver alteration, and keypair regeneration.
+  - Conditional SlowDNS status badge on the main menu dashboard and SSH panel.
+  - Automated inclusion of Nameserver and Public Key in SSH account creation outputs (CLI and Telegram HTML).
+  - Full integration into encrypted backup (`backup.sh`), recovery (`restore.sh`), and uninstaller (`uninstall.sh`).
+- **Full Xray Transport Matrix (XHTTP, HTTPUpgrade, gRPC, WebSocket)**:
+  - Added XHTTP (`/vless-xhttp`, `/vmess-xhttp`, `/trojan-xhttp`) configuration and upstreams across HAProxy and Nginx.
+  - Added HTTPUpgrade (`/vless-hu`, `/vmess-hu`, `/trojan-hu`) configuration.
+  - Added gRPC routing (`vless-grpc`, `vmess-grpc`, `trojan-grpc`).
+  - Updated Nginx configurations to modern `http2` directive and WebSocket upgrade maps.
+- **Go RESTful API Daemon (`api-server`) Enhancements**:
+  - Added SlowDNS monitoring and status endpoint: `GET /api/system/slowdns`.
+  - Added SlowDNS to `GET /api/system/services`.
+  - Enriched SSH account generation (`add-ssh.sh`, `trial-ssh.sh`) with SlowDNS config objects.
+  - Updated Go model and handlers to return all available protocol transports.
+- **SSH Bandwidth Quota System**:
+  - Unified quota management across SQLite database and live connection monitors.
+
+### Changed
+- Promoted project release status from beta to production **Release 4.0.0**.
+- Streamlined installer (`install.sh`) to initialize version 4.0.0 baseline.
+
 ## [0.3.0-beta] - 2026-08-01
 
 Direct upgrade to **v0.3.0-beta**. Consolidates Cloud Vault integration, multi-method Backup & Restore, bandwidth monitoring, speed limiting, Go API server integration, systemd timer migration, OpenVPN TCP consolidation, SELinux policies, and scanner protection fixes.
@@ -202,6 +232,7 @@ First public beta. Developed for **Rocky Linux 9**.
 - Legacy `.txt` account files and `config.json` comment markers.
 - Ads Block (helium) menu entry.
 
+[4.0.0]: https://github.com/risqinf/autoscript/releases/tag/v4.0.0
 [0.3.0-beta]: https://github.com/risqinf/autoscript/releases/tag/v0.3.0-beta
 [0.2.0-beta]: https://github.com/risqinf/autoscript/releases/tag/v0.2.0-beta
 [0.1.0-beta]: https://github.com/risqinf/autoscript/releases/tag/v0.1.0-beta

@@ -199,6 +199,7 @@ printf " ${WHITE}%-12s${NC} ${CYAN}:${NC} SSH ${PINK}[${GREEN}%s${PINK}]${NC}  V
 ui_rule
 ui_label "SERVICES"
 ui_status "SSH + WS"  "$resshws"
+[[ -s /etc/slowdns/server.pub ]] && ui_status "SlowDNS"   "$(svc_badge slowdns)"
 ui_status "Xray Core" "$resv2r"
 ui_status "Nginx"     "$resngx"
 ui_status "HAProxy"   "$reshap"

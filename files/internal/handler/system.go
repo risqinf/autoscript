@@ -41,3 +41,14 @@ func (h *SystemHandler) Services(ctx *fasthttp.RequestCtx) {
 
 	writeSuccess(ctx, fasthttp.StatusOK, "Services retrieved", statuses)
 }
+
+// SlowDNS handles GET /api/v1/system/slowdns.
+func (h *SystemHandler) SlowDNS(ctx *fasthttp.RequestCtx) {
+	status, err := h.service.GetSlowDNSInfo(ctx)
+	if err != nil {
+		handleServiceError(ctx, err)
+		return
+	}
+
+	writeSuccess(ctx, fasthttp.StatusOK, "SlowDNS info retrieved", status)
+}

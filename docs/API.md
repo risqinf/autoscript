@@ -127,7 +127,7 @@ curl -X POST https://<domain>/api/trials/vmess \
 ## 4. Config API
 
 ### Get Config Link — `GET /api/config/{protocol}/{username}`
-Returns the primary connection link, remark, and `transports` map (`ws_tls`, `ws_ntls`, `hu_tls`, `hu_ntls`, `xhttp_tls`, `xhttp_ntls`, `grpc_tls`).
+Returns the primary connection link, remark, and `transports` map (`ws_tls`, `ws_ntls`, `hu_tls`, `hu_ntls`, `xhttp_tls`, `xhttp_ntls`, `grpc_tls`). For SSH, transports also include `slowdns_nameserver`, `slowdns_public_key`, and `slowdns_port` when SlowDNS is enabled.
 
 ### Get OpenVPN File — `GET /api/config/openvpn/{username}`
 Returns the `.ovpn` file text.
@@ -140,4 +140,5 @@ Returns the `.ovpn` file text.
 - `GET /api/monitor/{protocol}` : Active login monitors and bandwidth
 - `GET /api/bandwidth` : System bandwidth statistics
 - `GET /api/system/info` : OS, RAM, CPU usage
-- `GET /api/system/services` : Background services health
+- `GET /api/system/services` : Background services health (including `slowdns`, `dropbear`, `xray`, `nginx`, `haproxy`)
+- `GET /api/system/slowdns` : SlowDNS (DNSTT) daemon status, nameserver, public key, and forward target

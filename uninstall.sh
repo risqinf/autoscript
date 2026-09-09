@@ -32,7 +32,7 @@ fi
 # ---------------------------------------------------------------------------
 echo "[1/9] Stopping and disabling services..."
 SERVICES=(
-    haproxy xray nginx dropbear ssh-ws server api-server squid
+    haproxy xray nginx dropbear ssh-ws server api-server squid slowdns
     quota limit-ip-vless quota-trojan limit-ip-trojan quota-vmess limit-ip-vmess
     autoexpire.timer limit-ip-ssh.timer backup.timer fixlog.timer
     openvpn-server@server-tcp-1194
@@ -49,6 +49,7 @@ rm -f /etc/systemd/system/ssh-ws.service
 rm -f /etc/systemd/system/server.service
 rm -f /etc/systemd/system/api-server.service
 rm -f /etc/systemd/system/dropbear.service
+rm -f /etc/systemd/system/slowdns.service
 rm -f /etc/systemd/system/quota.service
 rm -f /etc/systemd/system/quota-trojan.service
 rm -f /etc/systemd/system/quota-vmess.service
@@ -68,6 +69,8 @@ rm -f /usr/local/bin/xray
 rm -f /usr/local/bin/server
 rm -f /usr/local/bin/api-server
 rm -f /usr/local/bin/ssh-ws
+rm -f /usr/local/bin/dnstt-server
+rm -f /usr/sbin/dns-server
 rm -f /var/log/ssh-ws.log
 rm -rf /usr/local/share/xray
 rm -f /etc/rsyslog.d/00-autoscript-secure.conf
@@ -78,7 +81,7 @@ echo "[4/9] Removing management scripts, libraries, and API handlers..."
 rm -rf /usr/local/sbin/api
 rm -rf /usr/local/sbin/lib
 rm -f /usr/local/sbin/db-migrate
-for cmd in menu menu-ssh menu-vless menu-vmess menu-trojan menu-host menu-backup menu-api menu-dropbear menu-system \
+for cmd in menu menu-ssh menu-vless menu-vmess menu-trojan menu-host menu-backup menu-api menu-dropbear menu-system menu-slowdns \
     add-ssh add-vless add-vmess add-trojan add-bulk \
     trial-ssh trial-vless trial-vmess trial-trojan \
     delete-ssh delete-vless delete-vmess delete-trojan \
@@ -92,7 +95,7 @@ for cmd in menu menu-ssh menu-vless menu-vmess menu-trojan menu-host menu-backup
     loop-quota-vless loop-quota-vmess loop-quota-trojan \
     quota-vless quota-vmess quota-trojan \
     xp-ssh xp-vless xp-vmess xp-trojan \
-    install-api uninstall-api \
+    install-api uninstall-api slowdns \
     backup restore fixlog versi-xray stream-check change-domain change-dns change-timezone change-banner status set-telegram uninstall; do
     rm -f "/usr/local/sbin/$cmd"
 done
@@ -120,6 +123,7 @@ fi
 # ---------------------------------------------------------------------------
 echo "[6/9] Removing configs, database, and web/log directories..."
 rm -rf /etc/xray                       # config.json, xray.db, domain, keys, backup.pass
+rm -rf /etc/slowdns                    # SlowDNS keys and nameserver
 rm -f  /etc/nginx/risqinf.conf
 # Restore a stock nginx.conf (ours 'include's the now-removed risqinf.conf,
 # which would otherwise make nginx fail to start).

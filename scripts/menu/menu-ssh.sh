@@ -20,6 +20,7 @@ menu_ssh() {
     ui_opt 8 "Check Login (live)"
     ui_opt 9  "Change Dropbear Version"
     ui_opt 10 "Change WS Banner  (/etc/issue.net)"
+    ui_opt 11 "SlowDNS (DNSTT) Manager"
     ui_rule
     ui_opt 0  "Back to Main Menu"
     ui_foot
@@ -35,6 +36,7 @@ menu_ssh() {
         8)  cek-ssh ;;
         9)  menu-dropbear ;;
         10) change-banner ;;
+        11) menu-slowdns 2>/dev/null || slowdns ;;
         0|x|X) menu ;;
         *) err "Invalid option."; sleep 1; menu_ssh ;;
     esac

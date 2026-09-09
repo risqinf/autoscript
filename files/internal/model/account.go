@@ -102,6 +102,7 @@ type PortInfo struct {
 	WSTLS      string `json:"ws_tls,omitempty"`
 	BadVPN     string `json:"badvpn,omitempty"`
 	OpenVPNTCP string `json:"openvpn_tcp,omitempty"`
+	SlowDNS    string `json:"slowdns,omitempty"`
 	HUHTTP     string `json:"hu_http,omitempty"`
 	HUTLS      string `json:"hu_tls,omitempty"`
 	XHTTPHTTP  string `json:"xhttp_http,omitempty"`
@@ -109,14 +110,31 @@ type PortInfo struct {
 	GRPCTLS    string `json:"grpc_tls,omitempty"`
 }
 
+// SlowDNSDetail represents SlowDNS configuration details for accounts.
+type SlowDNSDetail struct {
+	Nameserver string `json:"nameserver,omitempty"`
+	PublicKey  string `json:"public_key,omitempty"`
+	Port       string `json:"port,omitempty"`
+}
+
+// SlowDNSStatus represents SlowDNS system service status and configuration.
+type SlowDNSStatus struct {
+	Status     string `json:"status"`
+	Nameserver string `json:"nameserver,omitempty"`
+	PublicKey  string `json:"public_key,omitempty"`
+	Port       string `json:"port"`
+	Target     string `json:"target"`
+}
+
 // AccountDisplay represents the full account display with ports and config.
 type AccountDisplay struct {
-	Username  string    `json:"username"`
-	Password  string    `json:"password,omitempty"`
-	Domain    string    `json:"domain"`
-	IP        string    `json:"ip"`
-	LimitIP   int       `json:"limit_ip"`
-	ExpiredAt time.Time `json:"expired_at"`
-	Ports     PortInfo  `json:"ports"`
-	Config    string    `json:"config,omitempty"`
+	Username  string         `json:"username"`
+	Password  string         `json:"password,omitempty"`
+	Domain    string         `json:"domain"`
+	IP        string         `json:"ip"`
+	LimitIP   int            `json:"limit_ip"`
+	ExpiredAt time.Time      `json:"expired_at"`
+	Ports     PortInfo       `json:"ports"`
+	Config    string         `json:"config,omitempty"`
+	SlowDNS   *SlowDNSDetail `json:"slowdns,omitempty"`
 }

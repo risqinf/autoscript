@@ -169,15 +169,29 @@ func (s *xrayService) getTrojanLink(username, secret, domain string) *model.Conf
 func (s *xrayService) getSSHLink(username, password, domain string) *model.ConfigLink {
 	config := fmt.Sprintf("%s:1-65535@%s:%s", domain, username, password)
 
+	transports := map[string]string{
+		"payload_tls":  fmt.Sprintf("GET / HTTP/1.1[crlf]Host: %s[crlf]Upgrade: websocket[crlf][crlf]", domain),
+		"payload_http": fmt.Sprintf("GET / HTTP/1.1[crlf]Host: %s[crlf]Upgrade: websocket[crlf][crlf]", domain),
+	}
+
+	if nsBytes, err := os.ReadFile("/etc/slowdns/nameserver"); err == nil {
+		if pubBytes, err := os.ReadFile("/etc/slowdns/server.pub"); err == nil {
+			ns := strings.TrimSpace(string(nsBytes))
+			pub := strings.TrimSpace(string(pubBytes))
+			if ns != "" && pub != "" {
+				transports["slowdns_nameserver"] = ns
+				transports["slowdns_public_key"] = pub
+				transports["slowdns_port"] = "53, 5300 UDP"
+			}
+		}
+	}
+
 	return &model.ConfigLink{
-		Protocol: "ssh",
-		Username: username,
-		Link:     config,
-		Remark:   "HTTP Custom config",
-		Transports: map[string]string{
-			"payload_tls":  fmt.Sprintf("GET / HTTP/1.1[crlf]Host: %s[crlf]Upgrade: websocket[crlf][crlf]", domain),
-			"payload_http": fmt.Sprintf("GET / HTTP/1.1[crlf]Host: %s[crlf]Upgrade: websocket[crlf][crlf]", domain),
-		},
+		Protocol:   "ssh",
+		Username:   username,
+		Link:       config,
+		Remark:     "HTTP Custom config",
+		Transports: transports,
 	}
 }
 

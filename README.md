@@ -1,24 +1,26 @@
 # Autoscript VPN
 
-> Version: **0.3.0-beta** — see [CHANGELOG.md](CHANGELOG.md).
+> Version: **4.0.0** (Release) — see [CHANGELOG.md](CHANGELOG.md).
 
 AutoScript VPN & Tunneling Management System, developed for **Rocky Linux 9**.
 
-Supports SSH, VLESS, VMESS, Trojan, and OpenVPN with WebSocket (WS), TLS, and HAProxy, plus a Web API for account management.
+Supports SSH, SlowDNS (DNSTT), VLESS, VMESS, Trojan, and OpenVPN with WebSocket (WS), HTTPUpgrade (HU), XHTTP, gRPC, TLS, HAProxy, and a high-performance Go RESTful API daemon for remote account management.
 
 ## Features
 
 - SSH (OpenSSH + Dropbear) with SSH-over-WebSocket (GO-TUNNEL PRO)
-- VLESS, VMESS, Trojan over WebSocket (TLS + non-TLS) via Xray-core
+- SlowDNS (DNSTT) DNS Tunneling Server (<15MB RAM footprint, dropbear target)
+- VLESS, VMESS, Trojan over WebSocket, HTTPUpgrade, XHTTP, and gRPC via Xray-core
 - OpenVPN (TCP 1194) with auto-generated, verified certificates
-- HAProxy + Nginx front (TLS termination, path/handshake-based WS routing)
+- HAProxy + Nginx front (TLS termination, path/handshake-based routing)
+- Dedicated Go RESTful API Daemon (`api-server`) with token authentication and rate limiting
 - SQLite-backed account database with soft-delete + recovery and audit log
-- Per-account quota and IP limit (VLESS/VMESS/Trojan); SSH IP limit
-- Live login monitors (per-protocol IP/quota; SSH per-user bandwidth, info only)
+- Per-account quota and IP limit (SSH/VLESS/VMESS/Trojan)
+- Live login monitors (per-protocol IP/quota; SSH per-user bandwidth)
 - Encrypted backup/restore supporting 3 methods: Telegram Bot (File ID),
   Manual File Zip, and Cloud Vault API (`cloud-vault`), with configurable
   auto-backup method selection
-- Service-status overview and a 3-state SSH-tunnel health badge
+- Service-status overview and SkyNode-style colored status badges
 - Strict firewall allowlist; hardened systemd services
 - Adaptive, ASCII-clean UI that stays tidy on phone terminals (Termux/PuTTY)
 - Auto-tuning by RAM/CPU (Nginx/HAProxy connections, TCP buffers, file limits,
@@ -49,12 +51,13 @@ OOM-ing a small VPS.
 | Dropbear | 109 | SSH |
 | HTTP | 80 | HAProxy → Nginx |
 | HTTPS / TLS | 443 | HAProxy → Nginx → Xray/SSH-WS |
+| SlowDNS (DNSTT) | 53/udp, 5300/udp | DNS Tunneling → Dropbear (109) |
 | BadVPN / UDPGW | 7300/udp | provided by ssh-ws |
 | OpenVPN | 1194/tcp | |
 
 Internal-only (bound to `127.0.0.1`, not in the firewall allowlist):
 Xray API `10085`, Nginx `81`/`444`, SSH-WS proxy `8888`, SSH-WS API `8081`,
-WebAPI `9000`.
+SlowDNS local `5300/udp`, WebAPI `9000`.
 
 ## Requirements
 

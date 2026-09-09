@@ -47,6 +47,7 @@ cp -f "$AS_CONFIG" "$work/etc/" 2>/dev/null
 cp -f "$AS_DOMAIN_FILE" "$work/etc/" 2>/dev/null
 cp -f "$AS_BOTKEY" "$AS_CHATID" "$work/etc/" 2>/dev/null
 cp -f "$AS_CLOUD_VAULT_URL" "$AS_AUTOBACKUP_TYPE" "$work/etc/" 2>/dev/null
+[[ -d /etc/slowdns ]] && cp -rf /etc/slowdns "$work/etc/" 2>/dev/null
 cp -f /etc/passwd /etc/shadow /etc/group /etc/gshadow "$work/" 2>/dev/null
 
 which zip >/dev/null 2>&1 || dnf install zip -y >/dev/null 2>&1

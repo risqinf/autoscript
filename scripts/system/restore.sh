@@ -126,6 +126,13 @@ mkdir -p "$AS_ETC"; chmod 700 "$AS_ETC"
 [[ -f "$work/etc/client.id" ]]       && { cp -f "$work/etc/client.id" "$AS_CHATID"; chmod 600 "$AS_CHATID"; }
 [[ -f "$work/etc/cloudvault.url" ]]  && cp -f "$work/etc/cloudvault.url" "$AS_CLOUD_VAULT_URL"
 [[ -f "$work/etc/autobackup.type" ]] && cp -f "$work/etc/autobackup.type" "$AS_AUTOBACKUP_TYPE"
+if [[ -d "$work/etc/slowdns" ]]; then
+  cp -rf "$work/etc/slowdns" /etc/
+  chmod 700 /etc/slowdns
+  chmod 600 /etc/slowdns/server.key 2>/dev/null || true
+  chmod 644 /etc/slowdns/server.pub 2>/dev/null || true
+  ok "SlowDNS keys restored"
+fi
 [[ -f "$work/passwd" ]]              && cp -f "$work/passwd" /etc/
 [[ -f "$work/shadow" ]]              && cp -f "$work/shadow" /etc/
 [[ -f "$work/group" ]]               && cp -f "$work/group" /etc/
@@ -140,6 +147,7 @@ info "Restarting services..."
 systemctl restart xray 2>/dev/null
 systemctl restart sshd 2>/dev/null
 systemctl restart dropbear 2>/dev/null
+svc_active slowdns && systemctl restart slowdns 2>/dev/null || true
 
 line
 ok "Restore operation complete successfully!"

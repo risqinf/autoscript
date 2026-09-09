@@ -33,10 +33,16 @@ fi
 exp_epoch=$(db_get_field "ssh" "$user" "expired_at")
 exp_disp=$(date -d "@${exp_epoch}" +"%d-%m-%Y %H:%M:%S")
 
+dns_ns=$(cat /etc/slowdns/nameserver 2>/dev/null | tr -d '\r\n')
+dns_pub=$(cat /etc/slowdns/server.pub 2>/dev/null | tr -d '\r\n')
+
 jq -nc --arg u "$user" --arg p "$pass" --arg d "$domain" --arg ip "$ip" \
       --argjson li "$limit_ip" --arg exp "$exp_disp" \
+      --arg dns_ns "$dns_ns" --arg dns_pub "$dns_pub" \
 '{status:"true",code:201,message:"SSH account created successfully",
   data:{username:$u,password:$p,domain:$d,ip:$ip,limit_ip:$li,expired:$exp,
          ports:{ssh:"109",ws_http:"80, 8888",ws_tls:"443",badvpn:"7300",
-                openvpn_tcp:"1194"},
+                openvpn_tcp:"1194",
+                slowdns:(if $dns_pub != "" then "53, 5300" else null end)},
+         slowdns:(if $dns_pub != "" then {nameserver:$dns_ns,public_key:$dns_pub,port:"53, 5300 UDP"} else null end),
         config:($d+":1-65535@"+$u+":"+$p)}}'
