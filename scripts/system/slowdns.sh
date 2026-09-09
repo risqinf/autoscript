@@ -168,7 +168,8 @@ slowdns_install() {
   echo ""
   echo -e " ${WHITE}Enter your Nameserver (NS) Subdomain.${NC}"
   echo -e " ${YELLOW}Note: Make sure NS record points to an A record of this VPS IP.${NC}"
-  read -rp " Nameserver [Default: ${default_ns}]: " ns_input
+  echo -ne "   ${CYAN}Input Nameserver [Default: ${default_ns}] : ${NC}"
+  read -r ns_input
   [[ -z "$ns_input" ]] && ns_input="$default_ns"
 
   # Clean input
@@ -196,7 +197,8 @@ slowdns_install() {
 # Uninstall SlowDNS
 slowdns_uninstall() {
   ui_header "UNINSTALL SLOWDNS"
-  read -rp " Are you sure you want to remove SlowDNS? [y/N]: " confirm
+  echo -ne "   ${YELLOW}Input confirmation to remove SlowDNS? [y/N] : ${NC}"
+  read -r confirm
   if [[ ! "$confirm" =~ ^[yY]$ ]]; then
     warn "Cancelled."
     return 0
@@ -267,7 +269,8 @@ slowdns_change_ns() {
   ui_header "CHANGE SLOWDNS NAMESERVER"
   echo -e " Current NS : ${CYAN}${current_ns}${NC}"
   echo ""
-  read -rp " Enter New Nameserver [Default: ${default_ns}]: " new_ns
+  echo -ne "   ${CYAN}Input New Nameserver [Default: ${default_ns}] : ${NC}"
+  read -r new_ns
   [[ -z "$new_ns" ]] && new_ns="$default_ns"
   new_ns=$(echo "$new_ns" | tr -d '[:space:]' | tr '[:upper:]' '[:lower:]')
 
@@ -290,7 +293,8 @@ slowdns_regen_key() {
   fi
 
   ui_header "REGENERATE SLOWDNS KEYPAIR"
-  read -rp " Are you sure you want to regenerate keypair? (Clients will need new pubkey) [y/N]: " confirm
+  echo -ne "   ${YELLOW}Input confirmation to regenerate keypair? [y/N] : ${NC}"
+  read -r confirm
   if [[ ! "$confirm" =~ ^[yY]$ ]]; then
     warn "Cancelled."
     return 0

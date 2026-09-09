@@ -3,11 +3,11 @@
 # Project: Autoscript VPN by risqinf
 # Description: AutoScript VPN & Tunneling Management System
 # Developed for Rocky Linux 9
-# Version: 5.0.0
+# Version: 5.1.0
 # License: Apache License 2.0 (see LICENSE file)
 # Repository: https://github.com/risqinf/autoscript
 # ========================================================
-AS_VERSION="5.0.0"
+AS_VERSION="5.1.0"
 # --- Color Definitions ---
 NC='\033[0m'
 RED='\033[0;31m'
@@ -2134,6 +2134,7 @@ squid_install_logic
 noobz_install_logic() {
   print_info "Installing & Configuring NoobzVpn Server..."
   mkdir -p /etc/noobzvpns
+  chmod 755 /etc/noobzvpns
 
   local arch; arch=$(uname -m)
   local bin_url="https://github.com/noobz-id/noobzvpns/raw/master/noobzvpns.x86-64"
@@ -2147,19 +2148,47 @@ noobz_install_logic() {
     return 0
   fi
 
+  # Ensure SSL certificate and key exist for NoobzVPN TLS parser
+  if [[ -f /etc/xray/xray.key && -f /etc/xray/xray.crt ]]; then
+    cp -f /etc/xray/xray.key /etc/noobzvpns/key.pem
+    cp -f /etc/xray/xray.crt /etc/noobzvpns/cert.pem
+  else
+    openssl req -new -newkey rsa:2048 -days 3650 -nodes -x509 \
+      -subj "/CN=noobzvpns" \
+      -keyout /etc/noobzvpns/key.pem -out /etc/noobzvpns/cert.pem >/dev/null 2>&1 || true
+  fi
+  chmod 600 /etc/noobzvpns/key.pem /etc/noobzvpns/cert.pem 2>/dev/null || true
+
+  # Ensure db_user.json exists
+  if [[ ! -f /etc/noobzvpns/db_user.json ]]; then
+    cat >/etc/noobzvpns/db_user.json <<'EOF'
+{
+  "version": 1,
+  "users": {}
+}
+EOF
+    chmod 600 /etc/noobzvpns/db_user.json
+  fi
+
   cat >/etc/noobzvpns/config.toml <<'EOF'
+# NoobzVpn-Server Configuration File
+# (c) Noobz-ID Software
+
 [tcp_plain]
 local_host = ["8585"]
 
 [tcp_ssl]
-local_host = []
+#local_host = ["443"]
+tls_version = "AUTO"
+key_pem = "/etc/noobzvpns/key.pem"
+cert_pem = "/etc/noobzvpns/cert.pem"
 
 [client]
 ip_version = "AUTO"
 tcp_initial_timeout = 30
 resolv_conf = "/etc/resolv.conf"
 identifier = "risqinf"
-banner = "You are connected to risqinf NoobzVPN"
+banner = "You are connected to noobzvpn-server"
 tcp_http_response = "HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n\r\n"
 
 [remote]
@@ -2170,16 +2199,18 @@ udp_idle_timeout = 60
 udp_dns_timeout = 10
 
 [database]
-database_monitor_timer = 10
+database_monitor_timer = 30
 device_timeout = 5
 
 [runtime]
 worker_threads = 0
 EOF
 
+  chmod 600 /etc/noobzvpns/config.toml
+
   cat >/etc/systemd/system/noobzvpns.service <<'EOF'
 [Unit]
-Description=NoobzVpn Server Daemon
+Description=NoobzVpn-Server
 Wants=network-online.target
 After=network.target network-online.target
 
@@ -2188,6 +2219,7 @@ CapabilityBoundingSet=CAP_NET_BIND_SERVICE
 AmbientCapabilities=CAP_NET_BIND_SERVICE
 User=root
 Type=simple
+WorkingDirectory=/etc/noobzvpns
 TimeoutStopSec=1
 LimitNOFILE=infinity
 ExecStart=/usr/bin/noobzvpns start-server

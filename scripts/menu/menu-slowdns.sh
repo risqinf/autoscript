@@ -37,42 +37,49 @@ menu_slowdns() {
   ui_opt 0 "Back to SSH Menu"
   ui_foot
 
-  read -rp " Select option : " opt
+  echo -ne "   ${CYAN}Select menu [0-6] : ${NC}"
+  read -r opt
   case "$opt" in
     1)
       clear
       slowdns start || slowdns restart
-      ui_back
+      echo ""
+      read -rp " Press Enter to continue..."
       menu_slowdns
       ;;
     2)
       clear
       slowdns stop
-      ui_back
+      echo ""
+      read -rp " Press Enter to continue..."
       menu_slowdns
       ;;
     3)
       clear
       slowdns change-ns
-      ui_back
+      echo ""
+      read -rp " Press Enter to continue..."
       menu_slowdns
       ;;
     4)
       clear
       slowdns regen-key
-      ui_back
+      echo ""
+      read -rp " Press Enter to continue..."
       menu_slowdns
       ;;
     5)
       clear
       slowdns install
-      ui_back
+      echo ""
+      read -rp " Press Enter to continue..."
       menu_slowdns
       ;;
     6)
       clear
       slowdns uninstall
-      ui_back
+      echo ""
+      read -rp " Press Enter to continue..."
       menu_slowdns
       ;;
     0|x|X)
@@ -87,7 +94,7 @@ menu_slowdns() {
       fi
       ;;
     *)
-      err "Invalid option."
+      echo -e "   ${RED}[!] Invalid option. Please select [0-6].${NC}"
       sleep 1
       menu_slowdns
       ;;

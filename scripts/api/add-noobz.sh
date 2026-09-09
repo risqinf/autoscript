@@ -28,7 +28,7 @@ if db_account_exists "noobz" "$user"; then
   err_json 409 "Username '$user' already exists"
 fi
 
-if ! acc_noobz_create "$user" "$pass" "$days" "$quota" "$limit_ip" >/dev/null 2>&1; then
+if ! acc_noobz_create "$user" "$pass" "$limit_ip" "$days" "$quota" >/dev/null 2>&1; then
   err_json 500 "Failed to create NoobzVPN account"
 fi
 

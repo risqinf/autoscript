@@ -3,6 +3,26 @@
 All notable changes to this project are documented here.
 This project adheres to [Semantic Versioning](https://semver.org/).
 
+## [5.1.0] - 2026-09-10
+
+Maintenance and stability release: **Release 5.1.0**. Fixes NoobzVPN core daemon schema parsing and service execution, auto-provisions required TLS certificate artifacts, enriches the SlowDNS terminal UI with interactive cues, and fixes API parameter alignment.
+
+### Fixed
+- **NoobzVPN (`noobzvpns`) Configuration Schema**:
+  - Resolved fatal `ConfigTomlError: missing field tls_version` caused by empty `[tcp_ssl]` block in `/etc/noobzvpns/config.toml`.
+  - Added required Serde deserialization fields (`tls_version = "AUTO"`, `key_pem`, `cert_pem`) while keeping `#local_host = ["443"]` disabled for HTTP upstream proxying.
+  - Automated generation and validation of SSL certificate (`/etc/noobzvpns/cert.pem`) and private key (`/etc/noobzvpns/key.pem`) during installation.
+  - Initialized default `/etc/noobzvpns/db_user.json` database structure.
+  - Added `WorkingDirectory=/etc/noobzvpns` and standard `Description=NoobzVpn-Server` to `noobzvpns.service` systemd unit to guarantee Unix socket (`db.socket`) and database paths resolve properly.
+- **API Account Handler**:
+  - Corrected parameter signature call in `scripts/api/add-noobz.sh` to properly align `limit_ip` (device limit) and `days` with `acc_noobz_create`.
+
+### Enhanced
+- **SlowDNS (DNSTT) Terminal UI**:
+  - Added dynamic, colored interactive input prompts (`Input Nameserver : `, `Input New Nameserver : `, `Input confirmation : `).
+  - Added formatted `"Select menu [0-6] : "` prompt in `menu-slowdns.sh`.
+  - Added `"Press Enter to continue..."` blocking pauses after all actions (Start, Stop, Change NS, Regen Key, Install, Uninstall) to prevent screen flashing and improve user navigation flow.
+
 ## [5.0.0] - 2026-09-10
 
 Major milestone: **Release 5.0.0**. Full enterprise launch with native NoobzVPN core daemon integration, SlowDNS (DNSTT) stealth tunneling, full multi-transport Xray matrix (WebSocket, HTTPUpgrade, XHTTP, gRPC), unified Go RESTful API daemon, authentic hardware device tracking, comprehensive API documentation, and enhanced backup/restore system.

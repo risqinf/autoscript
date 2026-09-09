@@ -1,6 +1,6 @@
 # Autoscript VPN
 
-> Version: **5.0.0** (Release) — see [CHANGELOG.md](CHANGELOG.md).
+> Version: **5.1.0** (Release) — see [CHANGELOG.md](CHANGELOG.md).
 
 AutoScript VPN & Tunneling Management System, engineered for **Rocky Linux 9**.
 
