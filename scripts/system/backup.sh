@@ -16,15 +16,7 @@ code=$(openssl rand -hex 4)
 backup_dir="${HOME:-/root}"
 zip_file="${backup_dir}/backup-${ts}-${tm}-${code}.zip"
 work="/root/.backup_work"
-
-# Clean up old local backup files if count >= 3 (keep max 2 before creating new backup)
-old_backups=($(ls -t "${backup_dir}"/backup-*.zip /root/backup-*.zip 2>/dev/null | sort -u))
-if (( ${#old_backups[@]} >= 3 )); then
-  info "Local backup count (${#old_backups[@]}) reached limit. Cleaning up older archives..."
-  for old_file in "${old_backups[@]:2}"; do
-    rm -f "$old_file" 2>/dev/null
-  done
-fi
+sent_remote=0
 
 # Backup encryption password from secure store (fallback: generate + persist).
 pass_file="${AS_ETC}/backup.pass"
@@ -84,6 +76,7 @@ case "$METHOD" in
 
       cv_code=$(echo "$resp" | jq -r '.data.code // .code // empty' 2>/dev/null)
       if [[ -n "$cv_code" && "$cv_code" != "null" ]]; then
+        sent_remote=1
         ok "Backup uploaded to Cloud Vault successfully!"
         direct_link="${cv_url}/api/file/${cv_code}"
       else
@@ -119,9 +112,13 @@ Direct Link : <code>${direct_link:-"N/A"}</code>
               "https://api.telegram.org/bot${botToken}/sendDocument")
 
   if echo "$resp" | grep -q '"ok":true'; then
-    ok "Backup sent to Telegram successfully."
     file_id=$(echo "$resp" | jq -r '.result.document.file_id // empty' 2>/dev/null)
     msg_id=$(echo "$resp" | jq -r '.result.message_id // empty' 2>/dev/null)
+
+    if [[ -n "$file_id" ]]; then
+      sent_remote=1
+      ok "Backup sent to Telegram successfully."
+    fi
 
     if [[ -n "$file_id" && -n "$msg_id" ]]; then
       updated_caption="📦 <b>AUTOSCRIPT BACKUP DATA</b>
@@ -165,10 +162,16 @@ ui_kv "Password" "${PASSWORD}"
 [[ -n "$file_id" ]] && ui_kv "Telegram ID" "${file_id}"
 line
 
-if [[ "$METHOD" == "cloudvault" && -n "$cv_code" ]] || [[ "$METHOD" == "telegram" && -n "$file_id" ]]; then
+if (( sent_remote == 1 )); then
   rm -f "$zip_file"
+  rm -f "${backup_dir}"/backup-*.zip /root/backup-*.zip 2>/dev/null
+  ok "Backup archive verified and delivered remotely."
+  ok "Local zip deleted from VPS to keep storage clean."
 else
-  ok "Backup archive stored locally at: ${zip_file}"
+  for old_file in "${backup_dir}"/backup-*.zip /root/backup-*.zip; do
+    [[ "$old_file" != "$zip_file" && -f "$old_file" ]] && rm -f "$old_file" 2>/dev/null
+  done
+  ok "Previous local backup removed. New backup saved at: ${zip_file}"
 fi
 
 ok "Backup operation finished."
