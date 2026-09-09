@@ -48,7 +48,7 @@ CREATE TABLE IF NOT EXISTS meta (
 
 CREATE TABLE IF NOT EXISTS accounts (
   id           INTEGER PRIMARY KEY AUTOINCREMENT,
-  protocol     TEXT NOT NULL CHECK (protocol IN ('ssh','vless','vmess','trojan')),
+  protocol     TEXT NOT NULL CHECK (protocol IN ('ssh','vless','vmess','trojan','noobz')),
   username     TEXT NOT NULL,
   secret       TEXT NOT NULL,                 -- password (ssh) or uuid/password (xray)
   quota_bytes  INTEGER NOT NULL DEFAULT 0,    -- 0 = unlimited
@@ -78,6 +78,40 @@ CREATE TABLE IF NOT EXISTS audit_log (
 
 INSERT OR IGNORE INTO meta(key,value) VALUES ('schema_version','1');
 " >/dev/null 2>&1
+
+  # Auto-migrate: ensure 'noobz' is permitted in protocol CHECK constraint for existing databases
+  local cur_schema
+  cur_schema=$(sqlite3 "$AS_DB" ".schema accounts" 2>/dev/null)
+  if [[ -n "$cur_schema" ]] && ! echo "$cur_schema" | grep -q "'noobz'"; then
+    db_exec "
+PRAGMA foreign_keys=OFF;
+BEGIN TRANSACTION;
+CREATE TABLE accounts_migrate (
+  id           INTEGER PRIMARY KEY AUTOINCREMENT,
+  protocol     TEXT NOT NULL CHECK (protocol IN ('ssh','vless','vmess','trojan','noobz')),
+  username     TEXT NOT NULL,
+  secret       TEXT NOT NULL,
+  quota_bytes  INTEGER NOT NULL DEFAULT 0,
+  used_bytes   INTEGER NOT NULL DEFAULT 0,
+  limit_ip     INTEGER NOT NULL DEFAULT 0,
+  expired_at   INTEGER NOT NULL,
+  status       TEXT NOT NULL DEFAULT 'active'
+                 CHECK (status IN ('active','suspended','expired','deleted')),
+  created_at   INTEGER NOT NULL DEFAULT (strftime('%s','now')),
+  updated_at   INTEGER NOT NULL DEFAULT (strftime('%s','now')),
+  note         TEXT NOT NULL DEFAULT '',
+  UNIQUE (protocol, username)
+);
+INSERT INTO accounts_migrate SELECT * FROM accounts;
+DROP TABLE accounts;
+ALTER TABLE accounts_migrate RENAME TO accounts;
+CREATE INDEX IF NOT EXISTS idx_accounts_proto_status ON accounts(protocol,status);
+CREATE INDEX IF NOT EXISTS idx_accounts_expired ON accounts(expired_at);
+COMMIT;
+PRAGMA foreign_keys=ON;
+" >/dev/null 2>&1
+  fi
+
   chmod 600 "$AS_DB" 2>/dev/null
   [[ -f "${AS_DB}-wal" ]] && chmod 600 "${AS_DB}-wal" 2>/dev/null
   [[ -f "${AS_DB}-shm" ]] && chmod 600 "${AS_DB}-shm" 2>/dev/null
