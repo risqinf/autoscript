@@ -1162,6 +1162,11 @@ upstream vmess_xhttp {
     keepalive 32;
 }
 
+upstream noobz_ws {
+    server 127.0.0.1:8585;
+    keepalive 32;
+}
+
 # Proper Connection header for WebSocket upgrades.
 map \$http_upgrade \$connection_upgrade {
     default upgrade;
@@ -1324,6 +1329,21 @@ server {
         proxy_buffering off;
     }
 
+    # Explicit NoobzVPN path.
+    location ~* ^/(noobz|noobz-ws) {
+        if (\$http_upgrade != "websocket") { return 444; }
+        proxy_pass http://noobz_ws;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade \$http_upgrade;
+        proxy_set_header Connection \$connection_upgrade;
+        proxy_set_header Host \$http_host;
+        proxy_set_header X-Real-IP \$remote_addr;
+        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+        proxy_read_timeout 7d;
+        proxy_send_timeout 7d;
+        proxy_buffering off;
+    }
+
     # OpenVPN client config downloads.
     location /risqinf/ {
         alias /var/www/html/risqinf/;
@@ -1452,6 +1472,21 @@ server {
 
     location ^~ /trojan-hu {
         proxy_pass http://trojan_hu;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade \$http_upgrade;
+        proxy_set_header Connection \$connection_upgrade;
+        proxy_set_header Host \$http_host;
+        proxy_set_header X-Real-IP \$remote_addr;
+        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+        proxy_read_timeout 7d;
+        proxy_send_timeout 7d;
+        proxy_buffering off;
+    }
+
+    # Explicit NoobzVPN path over port 82.
+    location ~* ^/(noobz|noobz-ws) {
+        if (\$http_upgrade != "websocket") { return 444; }
+        proxy_pass http://noobz_ws;
         proxy_http_version 1.1;
         proxy_set_header Upgrade \$http_upgrade;
         proxy_set_header Connection \$connection_upgrade;
@@ -2094,6 +2129,82 @@ EOF
 }
 
 squid_install_logic
+
+# ---- Install & Configure NoobzVpn Server (Port 8585 -> Nginx /noobz) ----
+noobz_install_logic() {
+  print_info "Installing & Configuring NoobzVpn Server..."
+  mkdir -p /etc/noobzvpns
+
+  local arch; arch=$(uname -m)
+  local bin_url="https://github.com/noobz-id/noobzvpns/raw/master/noobzvpns.x86-64"
+  [[ "$arch" == "aarch64" || "$arch" == "arm64" ]] && bin_url="https://github.com/noobz-id/noobzvpns/raw/master/noobzvpns.aarch64"
+
+  curl -sSL --connect-timeout 10 -o /usr/bin/noobzvpns "$bin_url" 2>/dev/null || wget -q -O /usr/bin/noobzvpns "$bin_url" 2>/dev/null
+  chmod +x /usr/bin/noobzvpns
+
+  if [[ ! -x /usr/bin/noobzvpns ]]; then
+    print_warn "Failed to download noobzvpns binary. NoobzVPN service skipped."
+    return 0
+  fi
+
+  cat >/etc/noobzvpns/config.toml <<'EOF'
+[tcp_plain]
+local_host = ["8585"]
+
+[tcp_ssl]
+local_host = []
+
+[client]
+ip_version = "AUTO"
+tcp_initial_timeout = 30
+resolv_conf = "/etc/resolv.conf"
+identifier = "risqinf"
+banner = "You are connected to risqinf NoobzVPN"
+tcp_http_response = "HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n\r\n"
+
+[remote]
+tcp_connect_timeout = 30
+tcp_idle_timeout = 900
+udp_connect_timeout = 30
+udp_idle_timeout = 60
+udp_dns_timeout = 10
+
+[database]
+database_monitor_timer = 10
+device_timeout = 5
+
+[runtime]
+worker_threads = 0
+EOF
+
+  cat >/etc/systemd/system/noobzvpns.service <<'EOF'
+[Unit]
+Description=NoobzVpn Server Daemon
+Wants=network-online.target
+After=network.target network-online.target
+
+[Service]
+CapabilityBoundingSet=CAP_NET_BIND_SERVICE
+AmbientCapabilities=CAP_NET_BIND_SERVICE
+User=root
+Type=simple
+TimeoutStopSec=1
+LimitNOFILE=infinity
+ExecStart=/usr/bin/noobzvpns start-server
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+  systemctl daemon-reload
+  systemctl enable noobzvpns >/dev/null 2>&1
+  systemctl restart noobzvpns >/dev/null 2>&1
+  check_service "noobzvpns" || print_warn "NoobzVpn service not active."
+}
+
+noobz_install_logic
 
 clear
 # Notification

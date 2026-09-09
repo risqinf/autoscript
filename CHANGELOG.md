@@ -8,6 +8,15 @@ This project adheres to [Semantic Versioning](https://semver.org/).
 Major stable milestone: **Release 4.0.0** (graduating from beta). Integrates SlowDNS (DNSTT) DNS tunneling, full multi-transport Xray routing (WebSocket, HTTPUpgrade, XHTTP, gRPC), unified Go API daemon updates, and end-to-end SSH quota management.
 
 ### Added
+- **NoobzVPN (`noobzvpns`) Protocol & Architecture**:
+  - Full automated installation and uninstallation of `noobzvpns` binary from upstream GitHub repository.
+  - HTTP-only daemon listener on `127.0.0.1:8585` configured with `identifier = "risqinf"`, proxied through Nginx via `upstream noobz_ws` on path `/noobz` (ports 80 and 443 with WebSocket upgrades).
+  - Authentic realtime device-id tracking and data integrity: reads authentic device hashes (`statistic.active_devices`) and byte traffic directly from `/etc/noobzvpns/db_user.json`.
+  - Complete CLI suite: `add-noobz`, `trial-noobz`, `delete-noobz`, `renew-noobz`, `list-noobz`, `config-noobz`, `cek-noobz`, and `recovery-noobz`.
+  - Interactive management submenu (`menu-noobz`) with live status badge and service control.
+  - Main menu dashboard integration with NoobzVPN account counter and service badge.
+  - Encrypted backup and restore support for `/etc/noobzvpns` configurations and user database.
+  - Full Go RESTful API daemon and shell API handlers (`/api/v1/accounts/noobz`, `/api/v1/trials/noobz`, `/api/v1/config/noobz`, `/api/v1/monitor/noobz`).
 - **SlowDNS (DNSTT) Tunnel Server**:
   - High-performance, lightweight DNS Tunneling daemon via `dnstt-server` (<15MB RAM).
   - Port binding on `:5300/udp` with non-conflicting firewall redirection (`53/udp -> 5300/udp`) to protect local resolvers.

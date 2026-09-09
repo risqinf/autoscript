@@ -133,6 +133,13 @@ if [[ -d "$work/etc/slowdns" ]]; then
   chmod 644 /etc/slowdns/server.pub 2>/dev/null || true
   ok "SlowDNS keys restored"
 fi
+if [[ -d "$work/etc/noobzvpns" ]]; then
+  cp -rf "$work/etc/noobzvpns" /etc/
+  chmod 700 /etc/noobzvpns
+  chmod 600 /etc/noobzvpns/config.toml 2>/dev/null || true
+  chmod 600 /etc/noobzvpns/db_user.json 2>/dev/null || true
+  ok "NoobzVPN configuration restored"
+fi
 [[ -f "$work/passwd" ]]              && cp -f "$work/passwd" /etc/
 [[ -f "$work/shadow" ]]              && cp -f "$work/shadow" /etc/
 [[ -f "$work/group" ]]               && cp -f "$work/group" /etc/
@@ -148,6 +155,7 @@ systemctl restart xray 2>/dev/null
 systemctl restart sshd 2>/dev/null
 systemctl restart dropbear 2>/dev/null
 svc_active slowdns && systemctl restart slowdns 2>/dev/null || true
+svc_active noobzvpns && systemctl restart noobzvpns 2>/dev/null || true
 
 line
 ok "Restore operation complete successfully!"

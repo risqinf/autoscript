@@ -69,13 +69,14 @@ type SystemInfo struct {
 
 // MonitorEntry represents a single login monitor entry.
 type MonitorEntry struct {
-	Username string   `json:"username"`
-	IPCount  int      `json:"ip_count"`
-	IPLimit  int      `json:"ip_limit"`
-	IPs      []string `json:"ips"`
-	UsedBytes int64   `json:"used_bytes"`
-	QuotaBytes int64  `json:"quota_bytes"`
-	ExpiredAt time.Time `json:"expired_at"`
+	Username   string    `json:"username"`
+	IPCount    int       `json:"ip_count"`
+	IPLimit    int       `json:"ip_limit"`
+	IPs        []string  `json:"ips"`
+	Devices    []string  `json:"devices,omitempty"`
+	UsedBytes  int64     `json:"used_bytes"`
+	QuotaBytes int64     `json:"quota_bytes"`
+	ExpiredAt  time.Time `json:"expired_at"`
 }
 
 // BandwidthEntry represents bandwidth usage.
@@ -108,6 +109,8 @@ type PortInfo struct {
 	XHTTPHTTP  string `json:"xhttp_http,omitempty"`
 	XHTTPTLS   string `json:"xhttp_tls,omitempty"`
 	GRPCTLS    string `json:"grpc_tls,omitempty"`
+	NoobzTCP   string `json:"noobz_tcp,omitempty"`
+	NoobzWS    string `json:"noobz_ws,omitempty"`
 }
 
 // SlowDNSDetail represents SlowDNS configuration details for accounts.

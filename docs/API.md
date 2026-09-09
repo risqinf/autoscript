@@ -57,28 +57,30 @@ Error:
 
 ## 2. Accounts API
 
-Replace `{protocol}` with `ssh`, `vless`, `vmess`, or `trojan`.
+Replace `{protocol}` with `ssh`, `vless`, `vmess`, `trojan`, or `noobz`.
 
 ### Create — `POST /api/accounts/{protocol}`
 ```bash
-curl -X POST https://<domain>/api/accounts/ssh \
+curl -X POST https://<domain>/api/accounts/noobz \
   -H "Authorization: Bearer <token>" \
   -H "Content-Type: application/json" \
   -d '{
     "username": "john_doe",
     "password": "Secret123",
     "days": 30,
-    "limit_ip": 2
+    "limit_ip": 2,
+    "quota": 50
   }'
 ```
 **Notes:** 
-- `quota` (in GB, 0 = unlimited) is supported for all protocols (`ssh`, `vless`, `vmess`, `trojan`).
+- `quota` (in GB, 0 = unlimited) is supported for all protocols (`ssh`, `vless`, `vmess`, `trojan`, `noobz`).
 - For Xray (`vless`, `vmess`, `trojan`), if `secret` is omitted, UUID/password is auto-generated.
+- For `noobz`, `limit_ip` maps to device limit enforced natively by `noobzvpns`.
 - `days` must be an integer.
 
 ### Renew — `POST /api/accounts/{protocol}/{username}/renew`
 ```bash
-curl -X POST https://<domain>/api/accounts/ssh/john_doe/renew \
+curl -X POST https://<domain>/api/accounts/noobz/john_doe/renew \
   -H "Authorization: Bearer <token>" \
   -H "Content-Type: application/json" \
   -d '{
@@ -88,21 +90,21 @@ curl -X POST https://<domain>/api/accounts/ssh/john_doe/renew \
 
 ### Delete — `DELETE /api/accounts/{protocol}/{username}`
 ```bash
-curl -X DELETE https://<domain>/api/accounts/ssh/john_doe \
+curl -X DELETE https://<domain>/api/accounts/noobz/john_doe \
   -H "Authorization: Bearer <token>"
 ```
-*Note: Deletes are soft (status flips to `deleted`) so accounts remain recoverable.*
+*Note: Deletes are soft in the SQLite database while removing the client from active daemon configs/CLI, so accounts remain recoverable.*
 
 ### Recovery — `POST /api/accounts/{protocol}/{username}/recovery`
 Restores a soft-deleted or suspended account back into the live config.
 ```bash
-curl -X POST https://<domain>/api/accounts/vmess/vpn_user/recovery \
+curl -X POST https://<domain>/api/accounts/noobz/john_doe/recovery \
   -H "Authorization: Bearer <token>"
 ```
 
 ### Get Account — `GET /api/accounts/{protocol}/{username}`
 ```bash
-curl -X GET https://<domain>/api/accounts/vless/vpn_user \
+curl -X GET https://<domain>/api/accounts/noobz/john_doe \
   -H "Authorization: Bearer <token>"
 ```
 
@@ -112,7 +114,7 @@ curl -X GET https://<domain>/api/accounts/vless/vpn_user \
 
 ### Create Trial — `POST /api/trials/{protocol}`
 ```bash
-curl -X POST https://<domain>/api/trials/vmess \
+curl -X POST https://<domain>/api/trials/noobz \
   -H "Authorization: Bearer <token>" \
   -H "Content-Type: application/json" \
   -d '{
@@ -120,14 +122,17 @@ curl -X POST https://<domain>/api/trials/vmess \
     "limit_ip": 1
   }'
 ```
-*Trials default to quota `10 GB` (including SSH) and auto-generate credentials.*
+*Trials default to quota `10 GB` and auto-generate credentials.*
 
 ---
 
 ## 4. Config API
 
 ### Get Config Link — `GET /api/config/{protocol}/{username}`
-Returns the primary connection link, remark, and `transports` map (`ws_tls`, `ws_ntls`, `hu_tls`, `hu_ntls`, `xhttp_tls`, `xhttp_ntls`, `grpc_tls`). For SSH, transports also include `slowdns_nameserver`, `slowdns_public_key`, and `slowdns_port` when SlowDNS is enabled.
+Returns the connection config, remark, and `transports` map:
+- **Xray (`vless`, `vmess`, `trojan`)**: `ws_tls`, `ws_ntls`, `hu_tls`, `hu_ntls`, `xhttp_tls`, `xhttp_ntls`, `grpc_tls`.
+- **SSH**: HTTP Custom payload, plus `slowdns_nameserver`, `slowdns_public_key`, and `slowdns_port` when SlowDNS is enabled.
+- **NoobzVPN (`noobz`)**: `identifier` (`risqinf`), `payload` (`GET /noobz HTTP/1.1[crlf]Host: <domain>[crlf]Upgrade: websocket[crlf][crlf]`), `tcp_port` (`8585`), and `ws_port` (`80, 8080 (HTTP), 443 (HTTPS)`).
 
 ### Get OpenVPN File — `GET /api/config/openvpn/{username}`
 Returns the `.ovpn` file text.
@@ -136,9 +141,9 @@ Returns the `.ovpn` file text.
 
 ## 5. Monitoring & System API
 
-- `GET /api/status` : Services status (nginx, xray, ssh, dropbear)
-- `GET /api/monitor/{protocol}` : Active login monitors and bandwidth
+- `GET /api/status` : Services status (nginx, xray, ssh, dropbear, noobzvpns)
+- `GET /api/monitor/{protocol}` : Active login monitors and bandwidth. For `noobz`, reads directly from `/etc/noobzvpns/db_user.json` with authentic `active_devices` hashes and byte statistics.
 - `GET /api/bandwidth` : System bandwidth statistics
 - `GET /api/system/info` : OS, RAM, CPU usage
-- `GET /api/system/services` : Background services health (including `slowdns`, `dropbear`, `xray`, `nginx`, `haproxy`)
+- `GET /api/system/services` : Background services health (including `slowdns`, `noobzvpns`, `dropbear`, `xray`, `nginx`, `haproxy`)
 - `GET /api/system/slowdns` : SlowDNS (DNSTT) daemon status, nameserver, public key, and forward target

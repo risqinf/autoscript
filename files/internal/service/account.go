@@ -109,6 +109,31 @@ func (s *accountService) getLiveXrayUsage(ctx context.Context, username string) 
 	return total
 }
 
+// getLiveNoobzUsage reads real-time traffic statistics from /etc/noobzvpns/db_user.json.
+func (s *accountService) getLiveNoobzUsage(username string) int64 {
+	data, err := os.ReadFile("/etc/noobzvpns/db_user.json")
+	if err != nil {
+		return 0
+	}
+	var dbUser struct {
+		Users map[string]struct {
+			Statistic struct {
+				BytesUsage struct {
+					Up   int64 `json:"up"`
+					Down int64 `json:"down"`
+				} `json:"bytes_usage"`
+			} `json:"statistic"`
+		} `json:"users"`
+	}
+	if err := json.Unmarshal(data, &dbUser); err != nil {
+		return 0
+	}
+	if u, ok := dbUser.Users[username]; ok {
+		return u.Statistic.BytesUsage.Up + u.Statistic.BytesUsage.Down
+	}
+	return 0
+}
+
 // GetAccount retrieves an account by protocol and username.
 func (s *accountService) GetAccount(ctx context.Context, protocol, username string) (*model.Account, error) {
 	account, err := s.repo.GetByUsername(ctx, protocol, username)
@@ -123,6 +148,10 @@ func (s *accountService) GetAccount(ctx context.Context, protocol, username stri
 	switch protocol {
 	case "ssh":
 		if liveBytes := s.getLiveSSHUsage(ctx, username); liveBytes > 0 {
+			account.UsedBytes = liveBytes
+		}
+	case "noobz":
+		if liveBytes := s.getLiveNoobzUsage(username); liveBytes > 0 {
 			account.UsedBytes = liveBytes
 		}
 	case "vless", "vmess", "trojan":
@@ -152,6 +181,8 @@ func (s *accountService) CreateAccount(ctx context.Context, protocol string, req
 		account, err = s.createSSHAccount(ctx, req)
 	case "vless", "vmess", "trojan":
 		account, err = s.createXrayAccount(ctx, protocol, req)
+	case "noobz":
+		account, err = s.createNoobzAccount(ctx, req)
 	default:
 		return nil, model.ErrInvalidProtocol
 	}
@@ -280,6 +311,52 @@ func (s *accountService) createXrayAccount(ctx context.Context, protocol string,
 	return account, nil
 }
 
+// createNoobzAccount creates a NoobzVPN user and database record.
+func (s *accountService) createNoobzAccount(ctx context.Context, req *model.CreateAccountRequest) (*model.Account, error) {
+	expiry := time.Now().AddDate(0, 0, req.Days)
+	expiryStr := expiry.Format("2006-01-02")
+
+	// Call noobzvpns user add <username> <password>
+	cmd := exec.CommandContext(ctx, "noobzvpns", "user", "add", req.Username, req.Password)
+	if output, err := cmd.CombinedOutput(); err != nil {
+		s.logger.Warn().Err(err).Str("output", string(output)).Msg("noobzvpns user add")
+	}
+
+	if req.Days > 0 {
+		cmdExpire := exec.CommandContext(ctx, "noobzvpns", "user", "expire", req.Username, expiryStr)
+		_ = cmdExpire.Run()
+	}
+
+	var quotaBytes int64
+	if req.Quota > 0 {
+		quotaBytes = int64(req.Quota) * 1073741824
+		cmdBandwidth := exec.CommandContext(ctx, "noobzvpns", "user", "bandwidth", req.Username, fmt.Sprintf("%d", quotaBytes))
+		_ = cmdBandwidth.Run()
+	}
+
+	if req.LimitIP > 0 {
+		cmdDevices := exec.CommandContext(ctx, "noobzvpns", "user", "devices", req.Username, fmt.Sprintf("%d", req.LimitIP))
+		_ = cmdDevices.Run()
+	}
+
+	account := &model.Account{
+		Protocol:   "noobz",
+		Username:   req.Username,
+		Secret:     req.Password,
+		QuotaBytes: quotaBytes,
+		LimitIP:    req.LimitIP,
+		ExpiredAt:  expiry,
+		Status:     "active",
+	}
+
+	if err := s.repo.Create(ctx, account); err != nil {
+		_ = exec.CommandContext(ctx, "noobzvpns", "user", "delete", req.Username).Run()
+		return nil, fmt.Errorf("create db record: %w", err)
+	}
+
+	return account, nil
+}
+
 // DeleteAccount deletes an account.
 func (s *accountService) DeleteAccount(ctx context.Context, protocol, username string) error {
 	// Get account first
@@ -291,8 +368,8 @@ func (s *accountService) DeleteAccount(ctx context.Context, protocol, username s
 		return model.ErrAccountNotFound
 	}
 
-	// Remove from xray config if not SSH
-	if protocol != "ssh" {
+	// Remove from xray config if not SSH and not noobz
+	if protocol != "ssh" && protocol != "noobz" {
 		if err := s.removeXrayClient(ctx, protocol, username); err != nil {
 			s.logger.Warn().Err(err).Msg("failed to remove xray client during delete")
 		}
@@ -308,6 +385,11 @@ func (s *accountService) DeleteAccount(ctx context.Context, protocol, username s
 		cmd := exec.CommandContext(ctx, "userdel", "--force", username)
 		if output, err := cmd.CombinedOutput(); err != nil {
 			s.logger.Warn().Err(err).Str("output", string(output)).Msg("failed to delete system user")
+		}
+	} else if protocol == "noobz" {
+		cmd := exec.CommandContext(ctx, "noobzvpns", "user", "delete", username)
+		if output, err := cmd.CombinedOutput(); err != nil {
+			s.logger.Warn().Err(err).Str("output", string(output)).Msg("failed to delete noobz user")
 		}
 	}
 
@@ -344,6 +426,12 @@ func (s *accountService) RenewAccount(ctx context.Context, protocol, username st
 		if output, err := cmd.CombinedOutput(); err != nil {
 			s.logger.Warn().Err(err).Str("output", string(output)).Msg("failed to update system user expiry")
 		}
+	} else if protocol == "noobz" {
+		expiryStr := account.ExpiredAt.Format("2006-01-02")
+		cmd := exec.CommandContext(ctx, "noobzvpns", "user", "expire", username, expiryStr)
+		if output, err := cmd.CombinedOutput(); err != nil {
+			s.logger.Warn().Err(err).Str("output", string(output)).Msg("failed to update noobz expiry")
+		}
 	}
 
 	if err := s.repo.Update(ctx, account); err != nil {
@@ -377,10 +465,20 @@ func (s *accountService) RecoverAccount(ctx context.Context, protocol, username 
 		return fmt.Errorf("account is %s, cannot recover", account.Status)
 	}
 
-	// Re-add to xray config if not SSH
-	if protocol != "ssh" {
+	// Re-add to xray config if not SSH and not noobz
+	if protocol != "ssh" && protocol != "noobz" {
 		if err := s.addXrayClient(ctx, protocol, username, account.Secret); err != nil {
 			return fmt.Errorf("re-add xray client: %w", err)
+		}
+	} else if protocol == "noobz" {
+		_ = exec.CommandContext(ctx, "noobzvpns", "user", "add", username, account.Secret).Run()
+		expiryStr := account.ExpiredAt.Format("2006-01-02")
+		_ = exec.CommandContext(ctx, "noobzvpns", "user", "expire", username, expiryStr).Run()
+		if account.LimitIP > 0 {
+			_ = exec.CommandContext(ctx, "noobzvpns", "user", "devices", username, fmt.Sprintf("%d", account.LimitIP)).Run()
+		}
+		if account.QuotaBytes > 0 {
+			_ = exec.CommandContext(ctx, "noobzvpns", "user", "bandwidth", username, fmt.Sprintf("%d", account.QuotaBytes)).Run()
 		}
 	}
 
@@ -420,6 +518,19 @@ func (s *accountService) UpdateAccount(ctx context.Context, protocol, username s
 
 	if req.Days > 0 {
 		account.ExpiredAt = account.ExpiredAt.AddDate(0, 0, req.Days)
+	}
+
+	if protocol == "noobz" {
+		if req.Quota > 0 {
+			_ = exec.CommandContext(ctx, "noobzvpns", "user", "bandwidth", username, fmt.Sprintf("%d", account.QuotaBytes)).Run()
+		}
+		if req.LimitIP >= 0 {
+			_ = exec.CommandContext(ctx, "noobzvpns", "user", "devices", username, fmt.Sprintf("%d", account.LimitIP)).Run()
+		}
+		if req.Days > 0 {
+			expiryStr := account.ExpiredAt.Format("2006-01-02")
+			_ = exec.CommandContext(ctx, "noobzvpns", "user", "expire", username, expiryStr).Run()
+		}
 	}
 
 	if err := s.repo.Update(ctx, account); err != nil {

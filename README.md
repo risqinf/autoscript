@@ -10,13 +10,14 @@ Supports SSH, SlowDNS (DNSTT), VLESS, VMESS, Trojan, and OpenVPN with WebSocket 
 
 - SSH (OpenSSH + Dropbear) with SSH-over-WebSocket (GO-TUNNEL PRO)
 - SlowDNS (DNSTT) DNS Tunneling Server (<15MB RAM footprint, dropbear target)
+- NoobzVPN (TCP 8585 & WebSocket `/noobz`) with authentic device hardware hash tracking
 - VLESS, VMESS, Trojan over WebSocket, HTTPUpgrade, XHTTP, and gRPC via Xray-core
 - OpenVPN (TCP 1194) with auto-generated, verified certificates
 - HAProxy + Nginx front (TLS termination, path/handshake-based routing)
 - Dedicated Go RESTful API Daemon (`api-server`) with token authentication and rate limiting
 - SQLite-backed account database with soft-delete + recovery and audit log
-- Per-account quota and IP limit (SSH/VLESS/VMESS/Trojan)
-- Live login monitors (per-protocol IP/quota; SSH per-user bandwidth)
+- Per-account quota and IP/device limit (SSH/VLESS/VMESS/Trojan/Noobz)
+- Live login monitors (authentic device hashes for Noobz; per-protocol IP/quota; SSH per-user bandwidth)
 - Encrypted backup/restore supporting 3 methods: Telegram Bot (File ID),
   Manual File Zip, and Cloud Vault API (`cloud-vault`), with configurable
   auto-backup method selection
@@ -52,12 +53,13 @@ OOM-ing a small VPS.
 | HTTP | 80 | HAProxy → Nginx |
 | HTTPS / TLS | 443 | HAProxy → Nginx → Xray/SSH-WS |
 | SlowDNS (DNSTT) | 53/udp, 5300/udp | DNS Tunneling → Dropbear (109) |
+| NoobzVPN | 8585/tcp, 80/443 (WS) | TCP direct & WebSocket (`/noobz`) |
 | BadVPN / UDPGW | 7300/udp | provided by ssh-ws |
 | OpenVPN | 1194/tcp | |
 
 Internal-only (bound to `127.0.0.1`, not in the firewall allowlist):
 Xray API `10085`, Nginx `81`/`444`, SSH-WS proxy `8888`, SSH-WS API `8081`,
-SlowDNS local `5300/udp`, WebAPI `9000`.
+NoobzVPN local `8585`, SlowDNS local `5300/udp`, WebAPI `9000`.
 
 ## Requirements
 
@@ -156,8 +158,9 @@ autoscript/
 ├── files/                  # Reserved for the RESTful API server (WIP)
 └── scripts/
     ├── lib/                # Shared libraries (common, db, xraycfg, account)
-    ├── menu/               # menu, menu-ssh, menu-vless, menu-vmess, ...
+    ├── menu/               # menu, menu-ssh, menu-vless, menu-vmess, menu-noobz, ...
     ├── ssh/                # SSH account management
+    ├── noobz/              # NoobzVPN account management
     ├── vless/              # VLESS account management
     ├── vmess/              # VMESS account management
     ├── trojan/             # Trojan account management

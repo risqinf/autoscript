@@ -126,6 +126,106 @@ acc_ssh_renew() {
   return 0
 }
 
+# ---- NOOBZVPN ACCOUNTS ----
+acc_noobz_create() {
+  local user="$1" pass="$2" limit_dev="${3:-0}" days="${4:-30}" quota_gb="${5:-0}"
+  local exp_epoch quota_bytes=0
+  exp_epoch=$(( $(date +%s) + days * 86400 ))
+  if [[ -n "$quota_gb" && "$quota_gb" =~ ^[0-9]+$ && "$quota_gb" -gt 0 ]]; then
+    quota_bytes=$(( quota_gb * 1073741824 ))
+  fi
+
+  if db_account_exists "noobz" "$user"; then
+    err "username '$user' already exists"; return 9
+  fi
+
+  if command -v noobzvpns &>/dev/null; then
+    noobzvpns add --password "$pass" "$user" --bandwidth "$quota_gb" --devices "$limit_dev" --expired "$days" >/dev/null 2>&1
+  fi
+
+  db_insert_account "noobz" "$user" "$pass" "$quota_bytes" "$limit_dev" "$exp_epoch"
+  db_audit "create" "noobz" "$user" "devices=${limit_dev} days=${days} quota=${quota_gb}GB"
+  return 0
+}
+
+acc_noobz_delete() {
+  local user="$1"
+  db_account_exists "noobz" "$user" || { err "account not found"; return 4; }
+  if command -v noobzvpns &>/dev/null; then
+    noobzvpns remove "$user" >/dev/null 2>&1
+  fi
+  db_set_status "noobz" "$user" "deleted"
+  db_audit "delete" "noobz" "$user" ""
+  return 0
+}
+
+acc_noobz_renew() {
+  local user="$1" days="$2"
+  local cur now base new
+  cur=$(db_get_field "noobz" "$user" "expired_at")
+  [[ -z "$cur" ]] && { err "account not found"; return 4; }
+  now=$(date +%s)
+  base=$cur; (( cur < now )) && base=$now
+  new=$(( base + days * 86400 ))
+  db_set_expired "noobz" "$user" "$new"
+  if command -v noobzvpns &>/dev/null; then
+    noobzvpns renew "$user" >/dev/null 2>&1 || true
+  fi
+  db_audit "renew" "noobz" "$user" "+${days}d"
+  echo "$new"
+  return 0
+}
+
+noobz_print_cli() {
+  local user="$1" pass="$2" dev_disp="$3" exp_disp="$4" quota_disp="${5:-Unlimited}" title="${6:-NOOBZVPN ACCOUNT}"
+  local d; d=$(get_domain); local sip; sip=$(get_ip)
+  ui_header "$title"
+  ui_kv "Username"     "$user" "$CYAN"
+  ui_kv "Password"     "$pass" "$CYAN"
+  ui_kv "Host / IP"    "${d} / ${sip}"
+  ui_kv "Quota"        "$quota_disp"
+  ui_kv "Limit Device" "$dev_disp"
+  ui_kv "Expired"      "$exp_disp"
+  ui_rule
+  ui_kv "Port HTTP"    "80"
+  ui_kv "Port TLS"     "443"
+  ui_kv "Identifier"   "risqinf"
+  ui_kv "Path"         "/noobz"
+  ui_rule
+  echo -e " ${WHITE}Payload (WS) :${NC}"
+  echo -e " ${GREEN}GET /noobz HTTP/1.1[crlf]Host: ${d}[crlf]Upgrade: websocket[crlf][crlf]${NC}"
+  ui_foot
+}
+
+noobz_tg_text() {
+  local user="$1" pass="$2" dev_disp="$3" exp_disp="$4" quota_disp="${5:-Unlimited}" title="${6:-NOOBZVPN ACCOUNT}"
+  local d; d=$(get_domain); local sip; sip=$(get_ip)
+  local eu ed ep eq edev ex
+  eu=$(html_escape "$user"); ed=$(html_escape "$d")
+  ep=$(html_escape "$pass"); eq=$(html_escape "$quota_disp")
+  edev=$(html_escape "$dev_disp"); ex=$(html_escape "$exp_disp")
+  cat <<EOF
+<b>━━━━━━━━━━━━━━━━━━━━━━━━━━━</b>
+<b>      ⊹ $(html_escape "$title") ⊹</b>
+<b>━━━━━━━━━━━━━━━━━━━━━━━━━━━</b>
+<b>Username     :</b> <code>${eu}</code>
+<b>Password     :</b> <code>${ep}</code>
+<b>Host / IP    :</b> <code>${ed}</code> / <code>${sip}</code>
+<b>Quota        :</b> <code>${eq}</code>
+<b>Limit Device :</b> <code>${edev}</code>
+<b>Expired      :</b> <code>${ex}</code>
+<b>━━━━━━━━━━━━━━━━━━━━━━━━━━━</b>
+<b>Port HTTP    :</b> <code>80</code>
+<b>Port TLS     :</b> <code>443</code>
+<b>Identifier   :</b> <code>risqinf</code>
+<b>Path         :</b> <code>/noobz</code>
+<b>━━━━━━━━━━━━━━━━━━━━━━━━━━━</b>
+<b>Payload :</b>
+<code>GET /noobz HTTP/1.1[crlf]Host: ${ed}[crlf]Upgrade: websocket[crlf][crlf]</code>
+<b>━━━━━━━━━━━━━━━━━━━━━━━━━━━</b>
+EOF
+}
+
 # ---- SHARED DISPLAY HELPERS ----
 # Full SSH account detail to the terminal. Args: user pass ip_disp exp_disp [quota_disp] [title]
 ssh_print_cli() {

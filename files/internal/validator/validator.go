@@ -37,7 +37,7 @@ func (v *Validator) ValidateCreateAccount(protocol string, req *model.CreateAcco
 
 	// Protocol-specific validation
 	switch protocol {
-	case "ssh":
+	case "ssh", "noobz":
 		if !v.IsValidPassword(req.Password) {
 			details = append(details, model.ErrorDetail{
 				Field:   "password",
@@ -79,7 +79,7 @@ func (v *Validator) ValidateCreateAccount(protocol string, req *model.CreateAcco
 	default:
 		details = append(details, model.ErrorDetail{
 			Field:   "protocol",
-			Message: "must be ssh, vless, vmess, or trojan",
+			Message: "must be ssh, vless, vmess, trojan, or noobz",
 		})
 	}
 
@@ -163,7 +163,7 @@ func (v *Validator) IsValidDuration(duration string) bool {
 // IsValidProtocol checks if a protocol is valid.
 func (v *Validator) IsValidProtocol(protocol string) bool {
 	switch protocol {
-	case "ssh", "vless", "vmess", "trojan":
+	case "ssh", "vless", "vmess", "trojan", "noobz":
 		return true
 	default:
 		return false

@@ -58,6 +58,7 @@ func (s *monitorService) GetServiceStatus(ctx context.Context) ([]model.ServiceS
 		{"squid", "3128"},
 		{"openvpn-server@server-tcp-1194", "1194"},
 		{"slowdns", "53, 5300"},
+		{"noobzvpns", "8585"},
 		{"vnstat", ""},
 		{"rsyslog", ""},
 		{"firewalld", ""},
@@ -228,6 +229,42 @@ func (s *monitorService) parseSSHSessions(ctx context.Context) (map[string][]str
 	return ipsByUser, bytesByUser
 }
 
+// parseNoobzSessions reads active devices and usage from /etc/noobzvpns/db_user.json.
+func (s *monitorService) parseNoobzSessions() (map[string][]string, map[string]int64) {
+	devicesByUser := make(map[string][]string)
+	bytesByUser := make(map[string]int64)
+
+	data, err := os.ReadFile("/etc/noobzvpns/db_user.json")
+	if err != nil {
+		return devicesByUser, bytesByUser
+	}
+
+	var dbUser struct {
+		Users map[string]struct {
+			Statistic struct {
+				BytesUsage struct {
+					Up   int64 `json:"up"`
+					Down int64 `json:"down"`
+				} `json:"bytes_usage"`
+				ActiveDevices []string `json:"active_devices"`
+			} `json:"statistic"`
+		} `json:"users"`
+	}
+
+	if err := json.Unmarshal(data, &dbUser); err != nil {
+		return devicesByUser, bytesByUser
+	}
+
+	for u, val := range dbUser.Users {
+		if len(val.Statistic.ActiveDevices) > 0 {
+			devicesByUser[u] = val.Statistic.ActiveDevices
+		}
+		bytesByUser[u] = val.Statistic.BytesUsage.Up + val.Statistic.BytesUsage.Down
+	}
+
+	return devicesByUser, bytesByUser
+}
+
 // GetMonitorEntries returns login monitor entries for a protocol.
 func (s *monitorService) GetMonitorEntries(ctx context.Context, protocol string) ([]model.MonitorEntry, error) {
 	// Get active accounts
@@ -238,9 +275,13 @@ func (s *monitorService) GetMonitorEntries(ctx context.Context, protocol string)
 
 	var ipsByUser map[string][]string
 	var sshBytesByUser map[string]int64
+	var noobzDevicesByUser map[string][]string
+	var noobzBytesByUser map[string]int64
 
 	if protocol == "ssh" {
 		ipsByUser, sshBytesByUser = s.parseSSHSessions(ctx)
+	} else if protocol == "noobz" {
+		noobzDevicesByUser, noobzBytesByUser = s.parseNoobzSessions()
 	} else {
 		logPath := "/var/log/xray/access.log"
 		var err error
@@ -252,6 +293,27 @@ func (s *monitorService) GetMonitorEntries(ctx context.Context, protocol string)
 
 	var entries []model.MonitorEntry
 	for _, account := range accounts {
+		if protocol == "noobz" {
+			devs := noobzDevicesByUser[account.Username]
+			if len(devs) == 0 {
+				continue
+			}
+			usedBytes := account.UsedBytes
+			if noobzBytesByUser != nil && noobzBytesByUser[account.Username] > 0 {
+				usedBytes = noobzBytesByUser[account.Username]
+			}
+			entries = append(entries, model.MonitorEntry{
+				Username:   account.Username,
+				IPCount:    len(devs),
+				IPLimit:    account.LimitIP,
+				Devices:    devs,
+				UsedBytes:  usedBytes,
+				QuotaBytes: account.QuotaBytes,
+				ExpiredAt:  account.ExpiredAt,
+			})
+			continue
+		}
+
 		ips := ipsByUser[account.Username]
 		if len(ips) == 0 {
 			continue // Skip users with no active connections

@@ -32,7 +32,7 @@ fi
 # ---------------------------------------------------------------------------
 echo "[1/9] Stopping and disabling services..."
 SERVICES=(
-    haproxy xray nginx dropbear ssh-ws server api-server squid slowdns
+    haproxy xray nginx dropbear ssh-ws server api-server squid slowdns noobzvpns
     quota limit-ip-vless quota-trojan limit-ip-trojan quota-vmess limit-ip-vmess
     autoexpire.timer limit-ip-ssh.timer backup.timer fixlog.timer
     openvpn-server@server-tcp-1194
@@ -50,6 +50,7 @@ rm -f /etc/systemd/system/server.service
 rm -f /etc/systemd/system/api-server.service
 rm -f /etc/systemd/system/dropbear.service
 rm -f /etc/systemd/system/slowdns.service
+rm -f /etc/systemd/system/noobzvpns.service
 rm -f /etc/systemd/system/quota.service
 rm -f /etc/systemd/system/quota-trojan.service
 rm -f /etc/systemd/system/quota-vmess.service
@@ -71,6 +72,7 @@ rm -f /usr/local/bin/api-server
 rm -f /usr/local/bin/ssh-ws
 rm -f /usr/local/bin/dnstt-server
 rm -f /usr/sbin/dns-server
+rm -f /usr/bin/noobzvpns
 rm -f /var/log/ssh-ws.log
 rm -rf /usr/local/share/xray
 rm -f /etc/rsyslog.d/00-autoscript-secure.conf
@@ -81,15 +83,15 @@ echo "[4/9] Removing management scripts, libraries, and API handlers..."
 rm -rf /usr/local/sbin/api
 rm -rf /usr/local/sbin/lib
 rm -f /usr/local/sbin/db-migrate
-for cmd in menu menu-ssh menu-vless menu-vmess menu-trojan menu-host menu-backup menu-api menu-dropbear menu-system menu-slowdns \
-    add-ssh add-vless add-vmess add-trojan add-bulk \
-    trial-ssh trial-vless trial-vmess trial-trojan \
-    delete-ssh delete-vless delete-vmess delete-trojan \
-    renew-ssh renew-vless renew-vmess renew-trojan \
+for cmd in menu menu-ssh menu-vless menu-vmess menu-trojan menu-host menu-backup menu-api menu-dropbear menu-system menu-slowdns menu-noobz \
+    add-ssh add-vless add-vmess add-trojan add-bulk add-noobz \
+    trial-ssh trial-vless trial-vmess trial-trojan trial-noobz \
+    delete-ssh delete-vless delete-vmess delete-trojan delete-noobz \
+    renew-ssh renew-vless renew-vmess renew-trojan renew-noobz \
     recovery-ssh recovery-vless recovery-vmess recovery-trojan \
-    cek-ssh cek-vless cek-vmess cek-trojan cek-user \
-    config-ssh config-vless config-vmess config-trojan \
-    list-ssh list-vless list-vmess list-trojan \
+    cek-ssh cek-vless cek-vmess cek-trojan cek-user cek-noobz \
+    config-ssh config-vless config-vmess config-trojan config-noobz \
+    list-ssh list-vless list-vmess list-trojan list-noobz \
     limit-ip-ssh limit-ip-vless limit-ip-vmess limit-ip-trojan \
     loop-ip-vless loop-ip-vmess loop-ip-trojan \
     loop-quota-vless loop-quota-vmess loop-quota-trojan \
@@ -124,6 +126,7 @@ fi
 echo "[6/9] Removing configs, database, and web/log directories..."
 rm -rf /etc/xray                       # config.json, xray.db, domain, keys, backup.pass
 rm -rf /etc/slowdns                    # SlowDNS keys and nameserver
+rm -rf /etc/noobzvpns                  # NoobzVPN configs and user database
 rm -f  /etc/nginx/risqinf.conf
 # Restore a stock nginx.conf (ours 'include's the now-removed risqinf.conf,
 # which would otherwise make nginx fail to start).

@@ -141,6 +141,7 @@ ssh1=$(db_query "SELECT COUNT(*) FROM accounts WHERE protocol='ssh' AND status!=
 vls=$(db_query "SELECT COUNT(*) FROM accounts WHERE protocol='vless' AND status!='deleted';" 2>/dev/null); vls=${vls:-0}
 vms=$(db_query "SELECT COUNT(*) FROM accounts WHERE protocol='vmess' AND status!='deleted';" 2>/dev/null); vms=${vms:-0}
 tro=$(db_query "SELECT COUNT(*) FROM accounts WHERE protocol='trojan' AND status!='deleted';" 2>/dev/null); tro=${tro:-0}
+nbz=$(db_query "SELECT COUNT(*) FROM accounts WHERE protocol='noobz' AND status!='deleted';" 2>/dev/null); nbz=${nbz:-0}
 
 # --- SERVICE STATUS (uses shared badges from common.sh) ---
 # SSH tunnel = dropbear + ssh-ws together (3-state: ON/WARN/OFF).
@@ -150,6 +151,7 @@ resv2r=$(svc_badge xray)
 reshap=$(svc_badge haproxy)
 resovpn=$(svc_badge openvpn-server@server-tcp-1194)
 ressquid=$(svc_badge squid)
+resnbz=$(svc_badge noobzvpns)
 resapi=$(svc_badge api-server)
 
 # --- SYSTEM INFO ---
@@ -195,7 +197,7 @@ ui_kv "RAM"      "$frem"
 ui_kv "CPU"      "$cpu"
 ui_kv "Traffic"  "$ttoday / $tyest / $tmon  (day/yest/mon)"
 ui_rule
-printf " ${WHITE}%-12s${NC} ${CYAN}:${NC} SSH ${PINK}[${GREEN}%s${PINK}]${NC}  VLESS ${PINK}[${GREEN}%s${PINK}]${NC}  VMESS ${PINK}[${GREEN}%s${PINK}]${NC}  TROJAN ${PINK}[${GREEN}%s${PINK}]${NC}\n" "Accounts" "$ssh1" "$vls" "$vms" "$tro"
+printf " ${WHITE}%-12s${NC} ${CYAN}:${NC} SSH ${PINK}[${GREEN}%s${PINK}]${NC}  VLESS ${PINK}[${GREEN}%s${PINK}]${NC}  VMESS ${PINK}[${GREEN}%s${PINK}]${NC}  TROJAN ${PINK}[${GREEN}%s${PINK}]${NC}  NOOBZ ${PINK}[${GREEN}%s${PINK}]${NC}\n" "Accounts" "$ssh1" "$vls" "$vms" "$tro" "$nbz"
 ui_rule
 ui_label "SERVICES"
 ui_status "SSH + WS"  "$resshws"
@@ -205,6 +207,7 @@ ui_status "Nginx"     "$resngx"
 ui_status "HAProxy"   "$reshap"
 ui_status "OpenVPN"   "$resovpn"
 ui_status "Squid"     "$ressquid"
+[[ -x /usr/bin/noobzvpns ]] && ui_status "NoobzVPN" "$resnbz"
 ui_status "API"       "$resapi"
 ui_rule
 ui_label "ACCOUNT PANELS"
@@ -212,17 +215,18 @@ ui_opt 1 "SSH / OpenVPN Panel"
 ui_opt 2 "VLESS Panel (WS/HU/XHTTP/gRPC)"
 ui_opt 3 "VMESS Panel (WS/HU/XHTTP/gRPC)"
 ui_opt 4 "TROJAN Panel (WS/HU/XHTTP/gRPC)"
+ui_opt 5 "NoobzVPN Panel (TCP/WS)"
 ui_rule
 ui_label "TOOLS"
-ui_opt 5 "Auto Bulk Create"
-ui_opt 6 "Account Cleaner"
-ui_opt 7 "User Checker"
-ui_opt 8 "API Menu"
+ui_opt 6 "Auto Bulk Create"
+ui_opt 7 "Account Cleaner"
+ui_opt 8 "User Checker"
+ui_opt 9 "API Menu"
 ui_rule
 ui_label "SERVER"
-ui_opt 9  "System Menu"
-ui_opt 10 "Backup / Restore"
-ui_opt 11 "RDNS Client (Private Tunnel) ${YELLOW}[SOON]${NC}"
+ui_opt 10 "System Menu"
+ui_opt 11 "Backup / Restore"
+ui_opt 12 "RDNS Client (Private Tunnel) ${YELLOW}[SOON]${NC}"
 ui_opt x  "Exit"
 ui_rule
 ui_kv "Xray" "$xray_version"
@@ -235,13 +239,14 @@ case $mm in
 2) clear ; run_cc ; menu-vless ;;
 3) clear ; run_cc ; menu-vmess ;;
 4) clear ; run_cc ; menu-trojan ;;
-5) clear ; run_cc ; add-bulk ;;
-6) clear ; run_cc ; delall ;;
-7) clear ; run_cc ; cek-user ;;
-8) clear ; run_cc ; menu-api ;;
-9) clear ; run_cc ; menu-system ;;
-10) clear ; run_cc ; menu-backup ;;
-11) clear ; run_cc ; menu_rdns_soon ;;
+5) clear ; run_cc ; menu-noobz ;;
+6) clear ; run_cc ; add-bulk ;;
+7) clear ; run_cc ; delall ;;
+8) clear ; run_cc ; cek-user ;;
+9) clear ; run_cc ; menu-api ;;
+10) clear ; run_cc ; menu-system ;;
+11) clear ; run_cc ; menu-backup ;;
+12) clear ; run_cc ; menu_rdns_soon ;;
 x|X) clear ; exit 0 ;;
 00) clear ; run_cc ; change-banner ;;
 *) echo "Invalid option, please try again." ; sleep 1 ; menu ;;

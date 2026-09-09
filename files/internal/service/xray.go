@@ -53,6 +53,8 @@ func (s *xrayService) GetConfigLink(ctx context.Context, protocol, username, sec
 		return s.getTrojanLink(username, secret, domain), nil
 	case "ssh":
 		return s.getSSHLink(username, secret, domain), nil
+	case "noobz":
+		return s.getNoobzLink(username, secret, domain), nil
 	default:
 		return nil, model.ErrInvalidProtocol
 	}
@@ -191,6 +193,26 @@ func (s *xrayService) getSSHLink(username, password, domain string) *model.Confi
 		Username:   username,
 		Link:       config,
 		Remark:     "HTTP Custom config",
+		Transports: transports,
+	}
+}
+
+// getNoobzLink generates NoobzVPN connection info and payload.
+func (s *xrayService) getNoobzLink(username, password, domain string) *model.ConfigLink {
+	config := fmt.Sprintf("%s:8585@%s:%s", domain, username, password)
+
+	transports := map[string]string{
+		"tcp_port":   "8585",
+		"ws_port":    "80, 8080 (HTTP), 443 (HTTPS)",
+		"identifier": "risqinf",
+		"payload":    fmt.Sprintf("GET /noobz HTTP/1.1[crlf]Host: %s[crlf]Upgrade: websocket[crlf][crlf]", domain),
+	}
+
+	return &model.ConfigLink{
+		Protocol:   "noobz",
+		Username:   username,
+		Link:       config,
+		Remark:     "NoobzVPN Payload & Identifier",
 		Transports: transports,
 	}
 }
