@@ -3,9 +3,9 @@
 All notable changes to this project are documented here.
 This project adheres to [Semantic Versioning](https://semver.org/).
 
-## [4.0.0] - 2026-09-10
+## [5.0.0] - 2026-09-10
 
-Major stable milestone: **Release 4.0.0** (graduating from beta). Integrates SlowDNS (DNSTT) DNS tunneling, full multi-transport Xray routing (WebSocket, HTTPUpgrade, XHTTP, gRPC), unified Go API daemon updates, and end-to-end SSH quota management.
+Major milestone: **Release 5.0.0**. Full enterprise launch with native NoobzVPN core daemon integration, SlowDNS (DNSTT) stealth tunneling, full multi-transport Xray matrix (WebSocket, HTTPUpgrade, XHTTP, gRPC), unified Go RESTful API daemon, authentic hardware device tracking, comprehensive API documentation, and enhanced backup/restore system.
 
 ### Added
 - **NoobzVPN (`noobzvpns`) Protocol & Architecture**:
@@ -17,6 +17,9 @@ Major stable milestone: **Release 4.0.0** (graduating from beta). Integrates Slo
   - Main menu dashboard integration with NoobzVPN account counter and service badge.
   - Encrypted backup and restore support for `/etc/noobzvpns` configurations and user database.
   - Full Go RESTful API daemon and shell API handlers (`/api/v1/accounts/noobz`, `/api/v1/trials/noobz`, `/api/v1/config/noobz`, `/api/v1/monitor/noobz`).
+- **Exhaustive Documentation & API Reference**:
+  - Completely rewritten `docs/API.md` documenting all endpoints, request/response models, rate limiting, and status codes.
+  - Comprehensive `README.md` with system architecture diagrams, port matrices, routing maps, and management overview.
 - **SlowDNS (DNSTT) Tunnel Server**:
   - High-performance, lightweight DNS Tunneling daemon via `dnstt-server` (<15MB RAM).
   - Port binding on `:5300/udp` with non-conflicting firewall redirection (`53/udp -> 5300/udp`) to protect local resolvers.
@@ -31,16 +34,17 @@ Major stable milestone: **Release 4.0.0** (graduating from beta). Integrates Slo
   - Added gRPC routing (`vless-grpc`, `vmess-grpc`, `trojan-grpc`).
   - Updated Nginx configurations to modern `http2` directive and WebSocket upgrade maps.
 - **Go RESTful API Daemon (`api-server`) Enhancements**:
+  - Native Go daemon using FastHTTP and zero-CGO SQLite driver.
   - Added SlowDNS monitoring and status endpoint: `GET /api/system/slowdns`.
-  - Added SlowDNS to `GET /api/system/services`.
+  - Added SlowDNS and NoobzVPN to `GET /api/system/services`.
   - Enriched SSH account generation (`add-ssh.sh`, `trial-ssh.sh`) with SlowDNS config objects.
   - Updated Go model and handlers to return all available protocol transports.
 - **SSH Bandwidth Quota System**:
   - Unified quota management across SQLite database and live connection monitors.
 
 ### Changed
-- Promoted project release status from beta to production **Release 4.0.0**.
-- Streamlined installer (`install.sh`) to initialize version 4.0.0 baseline.
+- Promoted project release status to production **Release 5.0.0**.
+- Streamlined installer (`install.sh`) and uninstaller (`uninstall.sh`) to version 5.0.0 baseline.
 
 ## [0.3.0-beta] - 2026-08-01
 
@@ -241,6 +245,7 @@ First public beta. Developed for **Rocky Linux 9**.
 - Legacy `.txt` account files and `config.json` comment markers.
 - Ads Block (helium) menu entry.
 
+[5.0.0]: https://github.com/risqinf/autoscript/releases/tag/v5.0.0
 [4.0.0]: https://github.com/risqinf/autoscript/releases/tag/v4.0.0
 [0.3.0-beta]: https://github.com/risqinf/autoscript/releases/tag/v0.3.0-beta
 [0.2.0-beta]: https://github.com/risqinf/autoscript/releases/tag/v0.2.0-beta

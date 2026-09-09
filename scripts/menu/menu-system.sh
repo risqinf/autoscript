@@ -17,11 +17,12 @@ menu_system() {
     ui_opt 5  "Xray Core Version"
     ui_opt 6  "Dropbear Version"
     ui_opt 7  "Change Timezone"
-    ui_opt 8  "Service Status"
-    ui_opt 9  "Telegram Setup"
-    ui_opt 10 "Limit Speed (Bandwidth Shaper)"
-    ui_opt 11 "Bandwidth Monitor (vnstat)"
-    ui_opt 12 "Uninstall Script"
+    ui_opt 8  "Service Manager (Status / On-Off / Restart)"
+    ui_opt 9  "Restart All Services"
+    ui_opt 10 "Telegram Setup"
+    ui_opt 11 "Limit Speed (Bandwidth Shaper)"
+    ui_opt 12 "Bandwidth Monitor (vnstat)"
+    ui_opt 13 "Uninstall Script"
     ui_rule
     ui_opt 0 "Back to Main Menu"
     ui_foot
@@ -35,10 +36,26 @@ menu_system() {
         6) clear ; menu-dropbear ;;
         7) clear ; change-timezone ;;
         8) clear ; status ;;
-        9) clear ; set-telegram ;;
-        10) clear ; limit-speed ; ui_back ; menu_system ;;
-        11) clear ; bw-monitor ; ui_back ; menu_system ;;
-        12) clear ; uninstall ;;
+        9)
+            clear
+            ui_header "RESTART ALL SERVICES"
+            echo ""
+            info "Restarting all core services..."
+            systemctl restart haproxy nginx xray sshd dropbear ssh-ws 2>/dev/null
+            svc_active openvpn-server@server-tcp-1194 && systemctl restart openvpn-server@server-tcp-1194 2>/dev/null || true
+            svc_active squid && systemctl restart squid 2>/dev/null || true
+            svc_active noobzvpns && systemctl restart noobzvpns 2>/dev/null || true
+            svc_active slowdns && systemctl restart slowdns 2>/dev/null || true
+            svc_active api-server && systemctl restart api-server 2>/dev/null || true
+            ok "All services restarted successfully."
+            echo ""
+            read -rp " Press Enter to continue..."
+            menu_system
+            ;;
+        10) clear ; set-telegram ;;
+        11) clear ; limit-speed ; ui_back ; menu_system ;;
+        12) clear ; bw-monitor ; ui_back ; menu_system ;;
+        13) clear ; uninstall ;;
         0|x|X) clear ; menu ;;
         *) err "Invalid option."; sleep 1; menu_system ;;
     esac

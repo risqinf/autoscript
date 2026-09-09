@@ -19,6 +19,8 @@ ROWS=(
   "sshd|OpenSSH|22, 3303"
   "squid|Squid Proxy|3128"
   "openvpn-server@server-tcp-1194|OpenVPN TCP|1194"
+  "noobzvpns|NoobzVPN Daemon|8585*"
+  "slowdns|SlowDNS (DNSTT)|53, 5300"
   "api-server|API Server|9000*"
   "vnstat|vnStat (bandwidth)|-"
   "rsyslog|rsyslog (secure)|-"
@@ -70,7 +72,7 @@ show_status() {
     # Hide optional maintenance units that were never installed (reduce noise).
     if ! unit_installed "$unit"; then
       case "$unit" in
-        quota*|limit-ip-*|autoexpire*|backup*|fixlog*) continue ;;
+        quota*|limit-ip-*|autoexpire*|backup*|fixlog*|slowdns*|noobzvpns*) continue ;;
       esac
     fi
     ((i++))
@@ -147,10 +149,23 @@ manage() {
 # --- Main loop ---
 while true; do
   show_status
-  echo -e " ${WHITE}Enter a service NO to manage  |  r refresh  |  0 back${NC}"
+  echo -e " ${WHITE}Enter a service NO to manage  |  a Restart All  |  r Refresh  |  0 Back${NC}"
   read -rp " Select : " sel
   case "$sel" in
     r|R) continue ;;
+    a|A)
+      echo ""
+      info "Restarting all core services..."
+      systemctl restart haproxy nginx xray sshd dropbear ssh-ws 2>/dev/null
+      svc_active openvpn-server@server-tcp-1194 && systemctl restart openvpn-server@server-tcp-1194 2>/dev/null || true
+      svc_active squid && systemctl restart squid 2>/dev/null || true
+      svc_active noobzvpns && systemctl restart noobzvpns 2>/dev/null || true
+      svc_active slowdns && systemctl restart slowdns 2>/dev/null || true
+      svc_active api-server && systemctl restart api-server 2>/dev/null || true
+      ok "All services restarted successfully."
+      sleep 2
+      continue
+      ;;
     0|x|X) clear; exec menu-system ;;
     ''|*[!0-9]*) err "Invalid option."; sleep 1 ;;
     *)

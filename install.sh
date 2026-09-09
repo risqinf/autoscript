@@ -3,11 +3,11 @@
 # Project: Autoscript VPN by risqinf
 # Description: AutoScript VPN & Tunneling Management System
 # Developed for Rocky Linux 9
-# Version: 4.0.0
+# Version: 5.0.0
 # License: Apache License 2.0 (see LICENSE file)
 # Repository: https://github.com/risqinf/autoscript
 # ========================================================
-AS_VERSION="4.0.0"
+AS_VERSION="5.0.0"
 # --- Color Definitions ---
 NC='\033[0m'
 RED='\033[0;31m'

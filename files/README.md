@@ -1,6 +1,6 @@
 # Autoscript VPN API Server
 
-RESTful API server for managing VPN accounts (SSH, VLESS, VMESS, Trojan).
+RESTful API server for managing VPN accounts (SSH, VLESS, VMESS, Trojan, NoobzVPN).
 
 ## Tech Stack
 
@@ -20,7 +20,7 @@ files/
 │   ├── handler/                # HTTP request handlers
 │   ├── service/                # Business logic
 │   ├── repository/             # Database access
-│   ├── middleware/              # Auth, logging, rate limiting
+│   ├── middleware/             # Auth, logging, rate limiting
 │   ├── router/                 # Route definitions
 │   └── validator/              # Input validation
 ├── migrations/                 # Database migrations
@@ -28,6 +28,8 @@ files/
 ```
 
 ## API Endpoints
+
+Supported `{protocol}`: `ssh`, `vless`, `vmess`, `trojan`, `noobz`.
 
 ### Health
 - `GET /api/health` - Health check (no auth)
@@ -50,12 +52,13 @@ files/
 
 ### Monitoring
 - `GET /api/status` - Service status
-- `GET /api/monitor/{protocol}` - Login monitor
+- `GET /api/monitor/{protocol}` - Login monitor (active IP/device tracking)
 - `GET /api/bandwidth` - Bandwidth stats
 
 ### System
 - `GET /api/system/info` - System information
 - `GET /api/system/services` - Service list
+- `GET /api/system/slowdns` - SlowDNS status, nameserver, and public key
 
 ## Authentication
 

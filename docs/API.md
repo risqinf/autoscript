@@ -1,149 +1,542 @@
-# Autoscript VPN — API Reference
+# Autoscript VPN — API Reference Manual
 
-> **Status:** The RESTful API server runs on a dedicated high-performance Go daemon.
-> This document describes the standard JSON contract implemented by the `/api` HTTP endpoints.
+> **Version:** 5.0.0 (Production Release)  
+> **Server Engine:** High-performance Go RESTful Daemon (`api-server`) powered by FastHTTP & SQLite (Zero CGO)  
+> **Repository:** [https://github.com/risqinf/autoscript](https://github.com/risqinf/autoscript)
 
 ---
 
-## 1. Overview
+## 1. Overview & Architecture
 
-| Item | Value |
-|------|-------|
-| Base URL | `https://<your-domain>/api` |
-| Internal | `http://127.0.0.1:9000/api` |
-| Auth | `Authorization: Bearer <token>` |
-| Content-Type | `application/json` |
+Autoscript provides a unified, production-grade RESTful API server for automated account lifecycle management, real-time login monitoring, network quota tracking, and system health telemetry.
 
-Tokens are generated via the `menu` -> `API Menu` on your VPS and stored in `/etc/api/key`. Each request body is a JSON object; each response is a JSON object with a `success`, `code`, and either `data` (success) or `error` (failure).
-
-### Response envelope
-
-Success:
-```json
-{ 
-  "success": true, 
-  "code": 200, 
-  "message": "Success", 
-  "data": { } 
-}
+```
+                  ┌──────────────────────────────────────────────┐
+                  │              Client / Frontend               │
+                  └──────────────────────┬───────────────────────┘
+                                         │ HTTPS / Bearer Token
+                                         ▼
+                  ┌──────────────────────────────────────────────┐
+                  │    HAProxy (Port 443) -> Nginx (Port 81)     │
+                  └──────────────────────┬───────────────────────┘
+                                         │ Reverse Proxy (/api)
+                                         ▼
+                  ┌──────────────────────────────────────────────┐
+                  │         Go API Daemon (Port 9000)            │
+                  │   FastHTTP Router + In-Memory Rate Limiter   │
+                  └──────┬───────────────┬────────────────┬──────┘
+                         │               │                │
+            ┌────────────▼────┐   ┌──────▼──────┐   ┌─────▼──────────┐
+            │ /etc/xray/      │   │ /var/log/   │   │ /etc/noobzvpns/│
+            │ xray.db (WAL)   │   │ xray/access │   │ db_user.json   │
+            │ accounts table  │   │ access.log  │   │ active_devices │
+            └─────────────────┘   └─────────────┘   └────────────────┘
 ```
 
-Error:
+### Connection Details
+
+| Attribute | Value |
+|---|---|
+| **Public Base URL** | `https://<your-domain>/api` |
+| **Internal Local URL** | `http://127.0.0.1:9000/api` |
+| **Authentication** | `Authorization: Bearer <API_TOKEN>` |
+| **Request / Response Format** | `application/json; charset=utf-8` |
+| **Rate Limit** | 100 requests per 60 seconds per client IP (configurable) |
+
+### API Tokens
+
+API tokens are managed on your VPS via `menu` -> `API Menu` (or using `menu-api`). Tokens are securely hashed and stored in `/etc/api/api.db`. Every request (except `/api/health`) must include the bearer header:
+
+```http
+Authorization: Bearer 8f14e45fceea167a5a36dedd4bea2543
+```
+
+---
+
+## 2. Standard Response Envelope
+
+All endpoints return a uniform JSON envelope ensuring predictable error handling across frontends, web dashboards, and Telegram bots.
+
+### Success Response (`200 OK`, `201 Created`)
+
 ```json
-{ 
-  "success": false, 
-  "code": 400, 
-  "error": {
-    "type": "VALIDATION_ERROR",
-    "message": "Validation failed",
-    "details": ["username is required"]
+{
+  "success": true,
+  "code": 200,
+  "message": "Operation completed successfully",
+  "data": {},
+  "meta": {
+    "total": 1,
+    "page": 1,
+    "per_page": 20
   }
 }
 ```
 
-### Common status codes
+### Error Response (`400`, `401`, `404`, `409`, `500`)
 
-| Code | Meaning |
-|------|---------|
-| 200 | OK (GET, PUT, DELETE, Renew, Recovery) |
-| 201 | Created (POST) |
-| 400 | Invalid input (validation failed) |
-| 401 | Unauthorized (Missing/invalid Bearer token) |
-| 404 | Account not found |
-| 409 | Username / UUID already in use |
-| 500 | Server-side failure (config or service error) |
+```json
+{
+  "success": false,
+  "code": 400,
+  "error": {
+    "type": "VALIDATION_ERROR",
+    "message": "Validation failed",
+    "details": [
+      {
+        "field": "username",
+        "message": "must be 3-32 alphanumeric characters or underscore"
+      }
+    ]
+  }
+}
+```
+
+### HTTP Status Code Matrix
+
+| Status Code | Type | Meaning |
+|---|---|---|
+| **200 OK** | Success | Standard response for GET, PUT, DELETE, Renew, and Recovery. |
+| **201 Created** | Success | New account or trial account successfully provisioned. |
+| **400 Bad Request** | Client Error | Input validation failure or malformed JSON payload. |
+| **401 Unauthorized** | Security | Missing, invalid, or expired Bearer token. |
+| **404 Not Found** | Client Error | Target account or system resource does not exist. |
+| **409 Conflict** | Client Error | Username or UUID is already registered and active. |
+| **429 Too Many Requests** | Rate Limit | Request rate exceeded limit (default 100 req/min). |
+| **500 Internal Error** | Server Error | Internal service failure, database exception, or binary error. |
 
 ---
 
-## 2. Accounts API
+## 3. Supported Protocol Matrix
 
-Replace `{protocol}` with `ssh`, `vless`, `vmess`, `trojan`, or `noobz`.
+The `{protocol}` path parameter accepts the following identifiers:
 
-### Create — `POST /api/accounts/{protocol}`
+| Protocol Identifier | Protocol & Engine Description | Transport Matrix / Features |
+|---|---|---|
+| `ssh` | OpenSSH & Dropbear daemon + Go WebSocket | Dropbear (109), SSH-WS (80, 443), BadVPN (7300), SlowDNS DNSTT (53/5300 UDP) |
+| `vless` | Xray-core VLESS inbound | WebSocket, HTTPUpgrade, XHTTP, gRPC, TLS |
+| `vmess` | Xray-core VMESS inbound | WebSocket, HTTPUpgrade, XHTTP, gRPC, TLS |
+| `trojan` | Xray-core Trojan inbound | WebSocket, HTTPUpgrade, XHTTP, gRPC, TLS |
+| `noobz` | NoobzVPN core daemon | TCP (8585), WebSocket (`/noobz`), authentic device-id tracking |
+
+---
+
+## 4. Accounts Management API
+
+### 4.1. Create Account
+`POST /api/accounts/{protocol}`
+
+Provisions a new account across the SQLite database, daemon configuration, and OS userland.
+
+#### Request Parameters
+
+| Field | Type | Required | Default | Description |
+|---|---|---|---|---|
+| `username` | string | **Yes** | — | 3-32 alphanumeric characters or underscore (`^[a-zA-Z0-9_]{3,32}$`). |
+| `password` | string | Optional | Auto-gen | Required for `ssh` & `noobz`. Prohibited characters: spaces, tabs, colons, newlines. |
+| `secret` | string | Optional | Auto UUIDv4 | Password/UUID for Xray protocols (`vless`, `vmess`, `trojan`). |
+| `days` | integer | **Yes** | — | Account validity period (1 to 3650 days). |
+| `limit_ip` | integer | Optional | `0` | Max simultaneous connections/devices (0 = unlimited). Enforced natively for Noobz. |
+| `quota` | integer | Optional | `0` | Total traffic limit in Gigabytes (0 = unlimited). Supported across all protocols. |
+
+#### Example: Create NoobzVPN Account
 ```bash
-curl -X POST https://<domain>/api/accounts/noobz \
-  -H "Authorization: Bearer <token>" \
+curl -s -X POST https://example.com/api/accounts/noobz \
+  -H "Authorization: Bearer YOUR_API_TOKEN" \
   -H "Content-Type: application/json" \
   -d '{
-    "username": "john_doe",
-    "password": "Secret123",
+    "username": "vip_noobz",
+    "password": "Password123!",
     "days": 30,
     "limit_ip": 2,
     "quota": 50
   }'
 ```
-**Notes:** 
-- `quota` (in GB, 0 = unlimited) is supported for all protocols (`ssh`, `vless`, `vmess`, `trojan`, `noobz`).
-- For Xray (`vless`, `vmess`, `trojan`), if `secret` is omitted, UUID/password is auto-generated.
-- For `noobz`, `limit_ip` maps to device limit enforced natively by `noobzvpns`.
-- `days` must be an integer.
 
-### Renew — `POST /api/accounts/{protocol}/{username}/renew`
-```bash
-curl -X POST https://<domain>/api/accounts/noobz/john_doe/renew \
-  -H "Authorization: Bearer <token>" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "days": 30
-  }'
-```
-
-### Delete — `DELETE /api/accounts/{protocol}/{username}`
-```bash
-curl -X DELETE https://<domain>/api/accounts/noobz/john_doe \
-  -H "Authorization: Bearer <token>"
-```
-*Note: Deletes are soft in the SQLite database while removing the client from active daemon configs/CLI, so accounts remain recoverable.*
-
-### Recovery — `POST /api/accounts/{protocol}/{username}/recovery`
-Restores a soft-deleted or suspended account back into the live config.
-```bash
-curl -X POST https://<domain>/api/accounts/noobz/john_doe/recovery \
-  -H "Authorization: Bearer <token>"
-```
-
-### Get Account — `GET /api/accounts/{protocol}/{username}`
-```bash
-curl -X GET https://<domain>/api/accounts/noobz/john_doe \
-  -H "Authorization: Bearer <token>"
+#### Example Response (`201 Created`)
+```json
+{
+  "success": true,
+  "code": 201,
+  "message": "Account created successfully",
+  "data": {
+    "id": 42,
+    "protocol": "noobz",
+    "username": "vip_noobz",
+    "secret": "Password123!",
+    "quota_bytes": 53687091200,
+    "used_bytes": 0,
+    "limit_ip": 2,
+    "expired_at": "2026-10-10T12:00:00Z",
+    "status": "active",
+    "created_at": "2026-09-10T12:00:00Z",
+    "updated_at": "2026-09-10T12:00:00Z"
+  }
+}
 ```
 
 ---
 
-## 3. Trials API
+### 4.2. List Accounts
+`GET /api/accounts/{protocol}?page=1&per_page=20`
 
-### Create Trial — `POST /api/trials/{protocol}`
+Retrieves a paginated list of accounts for the specified protocol.
+
+#### Query Parameters
+- `page` (integer, default: `1`): Page number.
+- `per_page` (integer, default: `20`, max: `100`): Records per page.
+
+#### Example Request
 ```bash
-curl -X POST https://<domain>/api/trials/noobz \
-  -H "Authorization: Bearer <token>" \
+curl -s -X GET "https://example.com/api/accounts/vless?page=1&per_page=10" \
+  -H "Authorization: Bearer YOUR_API_TOKEN"
+```
+
+#### Example Response (`200 OK`)
+```json
+{
+  "success": true,
+  "code": 200,
+  "message": "Accounts retrieved successfully",
+  "data": [
+    {
+      "id": 15,
+      "protocol": "vless",
+      "username": "user01",
+      "secret": "9a38f7e2-41f2-4e92-bc21-0a6125439401",
+      "quota_bytes": 107374182400,
+      "used_bytes": 1428582010,
+      "limit_ip": 2,
+      "expired_at": "2026-10-01T00:00:00Z",
+      "status": "active",
+      "created_at": "2026-09-01T00:00:00Z",
+      "updated_at": "2026-09-01T00:00:00Z"
+    }
+  ],
+  "meta": {
+    "total": 1,
+    "page": 1,
+    "per_page": 10
+  }
+}
+```
+
+---
+
+### 4.3. Get Single Account
+`GET /api/accounts/{protocol}/{username}`
+
+Retrieves details for a specific account including **real-time live byte consumption** (calculated dynamically from `ssh-ws` API for SSH, `Xray stats API` for Xray, and `db_user.json` for NoobzVPN).
+
+```bash
+curl -s -X GET https://example.com/api/accounts/noobz/vip_noobz \
+  -H "Authorization: Bearer YOUR_API_TOKEN"
+```
+
+---
+
+### 4.4. Update Account
+`PUT /api/accounts/{protocol}/{username}`
+
+Modifies quota, device limits, or adds additional days to an active account.
+
+#### Request Body
+```json
+{
+  "quota": 100,
+  "limit_ip": 3,
+  "days": 15
+}
+```
+
+---
+
+### 4.5. Renew Account
+`POST /api/accounts/{protocol}/{username}/renew`
+
+Extends the account expiration date. If the account is currently active, days are appended to the current expiry timestamp. If the account was already expired, days are counted from `now`.
+
+#### Request Body
+```json
+{
+  "days": 30
+}
+```
+
+#### Example Response (`200 OK`)
+```json
+{
+  "success": true,
+  "code": 200,
+  "message": "Account renewed successfully",
+  "data": {
+    "username": "vip_noobz",
+    "protocol": "noobz",
+    "days_added": 30,
+    "new_expiry": "2026-11-09T12:00:00Z"
+  }
+}
+```
+
+---
+
+### 4.6. Delete Account
+`DELETE /api/accounts/{protocol}/{username}`
+
+Performs an atomic soft-delete in SQLite (`status='deleted'`) and immediately purges the user from the live daemon routing config (Xray config, system userdel, or `noobzvpns user delete`). Soft-deleted accounts remain recoverable.
+
+```bash
+curl -s -X DELETE https://example.com/api/accounts/ssh/john_doe \
+  -H "Authorization: Bearer YOUR_API_TOKEN"
+```
+
+---
+
+### 4.7. Recover Account
+`POST /api/accounts/{protocol}/{username}/recovery`
+
+Restores a soft-deleted or suspended account back into active service, re-injects credentials into the daemon routing table, and marks status as `active`.
+
+```bash
+curl -s -X POST https://example.com/api/accounts/noobz/vip_noobz/recovery \
+  -H "Authorization: Bearer YOUR_API_TOKEN"
+```
+
+---
+
+## 5. Trial Accounts API
+
+### 5.1. Create Trial
+`POST /api/trials/{protocol}`
+
+Generates temporary trial credentials with automatic random username and password generation.
+
+#### Request Body
+
+| Field | Type | Required | Default | Description |
+|---|---|---|---|---|
+| `duration` | string | Optional | `"60m"` | Format: `30m`, `2h`, `1d`, etc. |
+| `limit_ip` | integer | Optional | `1` | Simultaneous connection/device limit. |
+
+#### Example Request
+```bash
+curl -s -X POST https://example.com/api/trials/noobz \
+  -H "Authorization: Bearer YOUR_API_TOKEN" \
   -H "Content-Type: application/json" \
   -d '{
-    "duration": "60m",
+    "duration": "120m",
     "limit_ip": 1
   }'
 ```
-*Trials default to quota `10 GB` and auto-generate credentials.*
+
+#### Example Response (`201 Created`)
+```json
+{
+  "success": true,
+  "code": 201,
+  "message": "Trial account created successfully",
+  "data": {
+    "account": {
+      "protocol": "noobz",
+      "username": "trial_9ab12c",
+      "secret": "kX7qL2mP9a",
+      "quota_bytes": 10737418240,
+      "limit_ip": 1,
+      "expired_at": "2026-09-10T14:00:00Z",
+      "status": "active"
+    },
+    "config": {
+      "protocol": "noobz",
+      "username": "trial_9ab12c",
+      "link": "example.com:8585@trial_9ab12c:kX7qL2mP9a",
+      "remark": "NoobzVPN Payload & Identifier",
+      "transports": {
+        "identifier": "risqinf",
+        "payload": "GET /noobz HTTP/1.1[crlf]Host: example.com[crlf]Upgrade: websocket[crlf][crlf]",
+        "tcp_port": "8585",
+        "ws_port": "80, 8080 (HTTP), 443 (HTTPS)"
+      }
+    }
+  }
+}
+```
 
 ---
 
-## 4. Config API
+## 6. Configuration & Client Links API
 
-### Get Config Link — `GET /api/config/{protocol}/{username}`
-Returns the connection config, remark, and `transports` map:
-- **Xray (`vless`, `vmess`, `trojan`)**: `ws_tls`, `ws_ntls`, `hu_tls`, `hu_ntls`, `xhttp_tls`, `xhttp_ntls`, `grpc_tls`.
-- **SSH**: HTTP Custom payload, plus `slowdns_nameserver`, `slowdns_public_key`, and `slowdns_port` when SlowDNS is enabled.
-- **NoobzVPN (`noobz`)**: `identifier` (`risqinf`), `payload` (`GET /noobz HTTP/1.1[crlf]Host: <domain>[crlf]Upgrade: websocket[crlf][crlf]`), `tcp_port` (`8585`), and `ws_port` (`80, 8080 (HTTP), 443 (HTTPS)`).
+### 6.1. Get Config Links & Payloads
+`GET /api/config/{protocol}/{username}?domain=example.com`
 
-### Get OpenVPN File — `GET /api/config/openvpn/{username}`
-Returns the `.ovpn` file text.
+Returns the complete client connection matrix for the target account.
+
+#### Protocol-Specific Payloads Returned:
+
+#### A. VLESS / VMESS / Trojan Matrix
+Returns comprehensive transport links:
+- `ws_tls`: WebSocket TLS (`:443`, path: `/{protocol}`)
+- `ws_ntls`: WebSocket Non-TLS (`:80`, path: `/{protocol}`)
+- `hu_tls`: HTTPUpgrade TLS (`:443`, path: `/{protocol}-hu`)
+- `hu_ntls`: HTTPUpgrade Non-TLS (`:80`, path: `/{protocol}-hu`)
+- `xhttp_tls`: XHTTP TLS (`:443`, path: `/{protocol}-xhttp`)
+- `xhttp_ntls`: XHTTP Non-TLS (`:80`, path: `/{protocol}-xhttp`)
+- `grpc_tls`: gRPC TLS (`:443`, serviceName: `{protocol}-grpc`)
+
+#### B. SSH Matrix
+- `payload_tls`: `GET / HTTP/1.1[crlf]Host: <domain>[crlf]Upgrade: websocket[crlf][crlf]`
+- `payload_http`: `GET / HTTP/1.1[crlf]Host: <domain>[crlf]Upgrade: websocket[crlf][crlf]`
+- `slowdns_nameserver`: Configured SlowDNS NS domain (if active).
+- `slowdns_public_key`: Server curve25519 public key.
+- `slowdns_port`: `53, 5300 UDP`.
+
+#### C. NoobzVPN Matrix
+- `identifier`: `"risqinf"`
+- `payload`: `GET /noobz HTTP/1.1[crlf]Host: <domain>[crlf]Upgrade: websocket[crlf][crlf]`
+- `tcp_port`: `8585`
+- `ws_port`: `80, 8080 (HTTP), 443 (HTTPS)`
 
 ---
 
-## 5. Monitoring & System API
+### 6.2. Download OpenVPN TCP Profile
+`GET /api/config/openvpn/{username}`
 
-- `GET /api/status` : Services status (nginx, xray, ssh, dropbear, noobzvpns)
-- `GET /api/monitor/{protocol}` : Active login monitors and bandwidth. For `noobz`, reads directly from `/etc/noobzvpns/db_user.json` with authentic `active_devices` hashes and byte statistics.
-- `GET /api/bandwidth` : System bandwidth statistics
-- `GET /api/system/info` : OS, RAM, CPU usage
-- `GET /api/system/services` : Background services health (including `slowdns`, `noobzvpns`, `dropbear`, `xray`, `nginx`, `haproxy`)
-- `GET /api/system/slowdns` : SlowDNS (DNSTT) daemon status, nameserver, public key, and forward target
+Returns the ready-to-import `.ovpn` configuration file as an attachment (`Content-Disposition: attachment; filename="{username}.ovpn"`).
+
+---
+
+## 7. Monitoring & System Telemetry API
+
+### 7.1. Login Monitor (Real-time Active Sessions)
+`GET /api/monitor/{protocol}`
+
+Inspects the live connection pool and returns active sessions, client IP addresses, authentic device hashes, and live bandwidth usage.
+
+#### Example Request
+```bash
+curl -s -X GET https://example.com/api/monitor/noobz \
+  -H "Authorization: Bearer YOUR_API_TOKEN"
+```
+
+#### Example Response (`200 OK`)
+```json
+{
+  "success": true,
+  "code": 200,
+  "message": "Login monitor retrieved successfully",
+  "data": [
+    {
+      "username": "farell",
+      "ip_count": 1,
+      "ip_limit": 1,
+      "devices": [
+        "0ad31b6f30b5c40df5be0b471685665e7386a4f6499ffe6e230fe2226f22808c"
+      ],
+      "used_bytes": 707204183,
+      "quota_bytes": 0,
+      "expired_at": "2026-10-07T21:49:17Z"
+    }
+  ]
+}
+```
+
+> [!NOTE]
+> For NoobzVPN, `devices` contains the genuine hardware SHA-256 device hashes registered when client applications open a tunnel session. Data is parsed directly from `/etc/noobzvpns/db_user.json`.
+
+---
+
+### 7.2. SlowDNS (DNSTT) Telemetry
+`GET /api/system/slowdns`
+
+Returns the runtime health, nameserver configuration, and public key of the SlowDNS daemon.
+
+#### Example Response (`200 OK`)
+```json
+{
+  "success": true,
+  "code": 200,
+  "message": "SlowDNS status retrieved successfully",
+  "data": {
+    "status": "active",
+    "nameserver": "ns.example.com",
+    "public_key": "6d123e4...b7890a",
+    "port": "53 / 5300 UDP",
+    "target": "127.0.0.1:109 (Dropbear)"
+  }
+}
+```
+
+---
+
+### 7.3. Service Health Status
+`GET /api/system/services`
+
+Returns systemd runtime state (`active` / `inactive`) and bound ports for all system daemons:
+- `haproxy` (80, 443)
+- `nginx` (81)
+- `xray` (1, 2, 3)
+- `dropbear` (109)
+- `ssh-ws` (8888)
+- `sshd` (22, 3303)
+- `squid` (3128)
+- `openvpn-server@server-tcp-1194` (1194)
+- `slowdns` (53, 5300)
+- `noobzvpns` (8585)
+- `vnstat`, `rsyslog`, `firewalld`
+
+---
+
+### 7.4. System Resource Metrics
+`GET /api/system/info`
+
+Returns host telemetry:
+```json
+{
+  "success": true,
+  "code": 200,
+  "message": "System info retrieved successfully",
+  "data": {
+    "domain": "example.com",
+    "ip": "203.0.113.10",
+    "cpu": "AMD EPYC 7763 64-Core Processor",
+    "cores": 2,
+    "ram_total": "1984 MB",
+    "ram_used": "452 MB",
+    "swap_total": "2048 MB",
+    "swap_used": "0 MB",
+    "uptime": "14 days, 3 hours",
+    "os": "Rocky Linux 9.4 (Blue Onyx)"
+  }
+}
+```
+
+---
+
+### 7.5. Health Check (Unauthenticated)
+`GET /api/health`
+
+Used by uptime probes, load balancers, and external health checks. Does not require an authentication header.
+
+```json
+{
+  "success": true,
+  "code": 200,
+  "message": "Service is healthy",
+  "data": {
+    "status": "ok"
+  }
+}
+```
+
+---
+
+## 8. Shell API Compatibility Mode (`scripts/api/`)
+
+In addition to the high-performance Go RESTful daemon, Autoscript provides a standard pipe-based CLI API suite located in `/usr/local/sbin/api/`. These scripts accept JSON strings via standard input (`stdin`) and output JSON to standard output (`stdout`), allowing legacy shell integrations and bot engines to operate interchangeably:
+
+```bash
+# Example: Creating a Noobz account via pipe CLI
+echo '{"username":"noobz_user","password":"mypassword","expired":30,"limit_ip":2,"quota":20}' | /usr/local/sbin/api/add-noobz
+
+# Example: Checking response
+# Output: {"status":"true","code":201,"message":"NoobzVPN account created successfully","data":{...}}
+```
