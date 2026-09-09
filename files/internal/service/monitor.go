@@ -294,6 +294,10 @@ func (s *monitorService) parseAccessLog(logPath string, windowSec int) (map[stri
 		ipsByUser[username][ip] = true
 	}
 
+	if err := scanner.Err(); err != nil {
+		return nil, fmt.Errorf("scan access log: %w", err)
+	}
+
 	// Convert map[string]bool to []string
 	result := make(map[string][]string)
 	for user, ipMap := range ipsByUser {

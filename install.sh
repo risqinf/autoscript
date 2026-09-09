@@ -243,7 +243,7 @@ print_success "Directories created."
 # Copy Menu
 REPO_OWNER="risqinf"
 REPO_NAME="autoscript"
-REPO_BRANCH="${REPO_BRANCH:-feat/xray-transport}"
+REPO_BRANCH="${REPO_BRANCH:-main}"
 REPO_TARBALL="https://github.com/${REPO_OWNER}/${REPO_NAME}/archive/refs/heads/${REPO_BRANCH}.tar.gz"
 
 menu_install_logic() {

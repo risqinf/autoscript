@@ -3,7 +3,6 @@ package service
 import (
 	"context"
 	"crypto/rand"
-	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -121,11 +120,12 @@ func (s *accountService) GetAccount(ctx context.Context, protocol, username stri
 	}
 
 	// For SSH, query real-time live usage from ssh-ws proxy
-	if protocol == "ssh" {
+	switch protocol {
+	case "ssh":
 		if liveBytes := s.getLiveSSHUsage(ctx, username); liveBytes > 0 {
 			account.UsedBytes = liveBytes
 		}
-	} else if protocol == "vless" || protocol == "vmess" || protocol == "trojan" {
+	case "vless", "vmess", "trojan":
 		// For Xray, live total = persisted DB bytes + un-reset counter (1:1 with cek-vmess/vless/trojan)
 		liveBytes := s.getLiveXrayUsage(ctx, username)
 		account.UsedBytes += liveBytes
@@ -601,13 +601,4 @@ func generateUUID() (string, error) {
 
 	return fmt.Sprintf("%x-%x-%x-%x-%x",
 		uuid[0:4], uuid[4:6], uuid[6:8], uuid[8:10], uuid[10:16]), nil
-}
-
-// generateRandomString generates a random hex string of the given length.
-func generateRandomString(length int) (string, error) {
-	bytes := make([]byte, (length+1)/2)
-	if _, err := rand.Read(bytes); err != nil {
-		return "", fmt.Errorf("generate random bytes: %w", err)
-	}
-	return hex.EncodeToString(bytes)[:length], nil
 }
