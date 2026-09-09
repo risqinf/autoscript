@@ -243,7 +243,7 @@ print_success "Directories created."
 # Copy Menu
 REPO_OWNER="risqinf"
 REPO_NAME="autoscript"
-REPO_BRANCH="main"
+REPO_BRANCH="${REPO_BRANCH:-feat/xray-transport}"
 REPO_TARBALL="https://github.com/${REPO_OWNER}/${REPO_NAME}/archive/refs/heads/${REPO_BRANCH}.tar.gz"
 
 menu_install_logic() {
@@ -255,7 +255,9 @@ menu_install_logic() {
   wget -qO "$tmpdir/repo.tar.gz" "$REPO_TARBALL"
   tar -xzf "$tmpdir/repo.tar.gz" -C "$tmpdir"
 
-  local srcdir="$tmpdir/${REPO_NAME}-${REPO_BRANCH}"
+  local srcdir
+  srcdir=$(find "$tmpdir" -mindepth 1 -maxdepth 1 -type d | head -1)
+  [[ -z "$srcdir" ]] && srcdir="$tmpdir/${REPO_NAME}-${REPO_BRANCH}"
 
   # Install shared libraries into /usr/local/sbin/lib (sourced, not commands).
   mkdir -p /usr/local/sbin/lib
