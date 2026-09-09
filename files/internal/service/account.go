@@ -194,14 +194,21 @@ func (s *accountService) createSSHAccount(ctx context.Context, req *model.Create
 		return nil, fmt.Errorf("chpasswd failed: %s: %w", string(output), err)
 	}
 
+	// Calculate quota
+	var quotaBytes int64
+	if req.Quota > 0 {
+		quotaBytes = int64(req.Quota) * 1073741824
+	}
+
 	// Create database record
 	account := &model.Account{
-		Protocol:  "ssh",
-		Username:  req.Username,
-		Secret:    req.Password,
-		LimitIP:   req.LimitIP,
-		ExpiredAt: expiry,
-		Status:    "active",
+		Protocol:   "ssh",
+		Username:   req.Username,
+		Secret:     req.Password,
+		QuotaBytes: quotaBytes,
+		LimitIP:    req.LimitIP,
+		ExpiredAt:  expiry,
+		Status:     "active",
 	}
 
 	if err := s.repo.Create(ctx, account); err != nil {
@@ -461,31 +468,12 @@ func sanitizeInput(input string) string {
 	return replacer.Replace(input)
 }
 
-// getXrayTag returns the xray inbound tag for a given protocol.
-func getXrayTag(protocol string) string {
-	switch protocol {
-	case "vless":
-		return "vless-ws"
-	case "vmess":
-		return "vmess-ws"
-	case "trojan":
-		return "trojan-ws"
-	}
-	return ""
-}
-
-// addXrayClient adds a client to the xray config.
+// addXrayClient adds a client to all matching inbounds in the xray config.
 func (s *accountService) addXrayClient(ctx context.Context, protocol, username, secret string) error {
 	// Sanitize inputs to prevent command injection
 	safeUsername := sanitizeInput(username)
 	safeSecret := sanitizeInput(secret)
-	tag := getXrayTag(protocol)
-	if tag == "" {
-		return model.ErrInvalidProtocol
-	}
 
-	// Build a jq filter that errors if the inbound tag is not found.
-	// This prevents silent failures where jq succeeds but the client is never added.
 	var clientJSON string
 	switch protocol {
 	case "vless":
@@ -494,12 +482,14 @@ func (s *accountService) addXrayClient(ctx context.Context, protocol, username, 
 		clientJSON = fmt.Sprintf(`{"id":"%s","alterId":0,"email":"%s"}`, safeSecret, safeUsername)
 	case "trojan":
 		clientJSON = fmt.Sprintf(`{"password":"%s","email":"%s"}`, safeSecret, safeUsername)
+	default:
+		return model.ErrInvalidProtocol
 	}
 
-	// jq filter: validate tag exists first, then add client
+	// jq filter: validate matching inbounds exist, then add client to all inbounds of that protocol
 	filter := fmt.Sprintf(
-		`if ([.inbounds[] | select(.tag=="%s")] | length) == 0 then error("inbound tag '%s' not found in xray config") else (.inbounds[] | select(.tag=="%s") | .settings.clients) += [%s] end`,
-		tag, tag, tag, clientJSON,
+		`if ([.inbounds[] | select(.protocol=="%s" and .settings.clients != null)] | length) == 0 then error("no inbounds for protocol '%s' found in xray config") else (.inbounds[] | select(.protocol=="%s" and .settings.clients != null) | .settings.clients) += [%s] end`,
+		protocol, protocol, protocol, clientJSON,
 	)
 
 	// Apply jq filter directly on the config file
@@ -507,9 +497,9 @@ func (s *accountService) addXrayClient(ctx context.Context, protocol, username, 
 	output, err := cmd.Output()
 	if err != nil {
 		if exitErr, ok := err.(*exec.ExitError); ok {
-			return fmt.Errorf("jq filter failed for tag '%s': %s: %w", tag, string(exitErr.Stderr), err)
+			return fmt.Errorf("jq filter failed for protocol '%s': %s: %w", protocol, string(exitErr.Stderr), err)
 		}
-		return fmt.Errorf("jq filter failed for tag '%s': %w", tag, err)
+		return fmt.Errorf("jq filter failed for protocol '%s': %w", protocol, err)
 	}
 
 	// Write to temp file (must end in .json for xray to recognize format)
@@ -538,36 +528,29 @@ func (s *accountService) addXrayClient(ctx context.Context, protocol, username, 
 	}
 
 	s.logger.Info().
-		Str("tag", tag).
+		Str("protocol", protocol).
 		Str("username", safeUsername).
 		Msg("xray client added")
 
 	return nil
 }
 
-// removeXrayClient removes a client from the xray config.
+// removeXrayClient removes a client from all matching inbounds in the xray config.
 func (s *accountService) removeXrayClient(ctx context.Context, protocol, username string) error {
 	// Sanitize input
 	safeUsername := sanitizeInput(username)
-	tag := getXrayTag(protocol)
-	if tag == "" {
+	if protocol != "vless" && protocol != "vmess" && protocol != "trojan" {
 		return model.ErrInvalidProtocol
 	}
 
-	// Use .email for vless/vmess and .password for trojan to match the client
-	var filter string
-	if protocol == "trojan" {
-		filter = fmt.Sprintf(`(.inbounds[] | select(.tag=="%s") | .settings.clients) |= map(select(.email != "%s"))`, tag, safeUsername)
-	} else {
-		filter = fmt.Sprintf(`(.inbounds[] | select(.tag=="%s") | .settings.clients) |= map(select(.email != "%s"))`, tag, safeUsername)
-	}
+	filter := fmt.Sprintf(`(.inbounds[] | select(.protocol=="%s" and .settings.clients != null) | .settings.clients) |= map(select(.email != "%s"))`, protocol, safeUsername)
 
 	// Apply jq filter directly on the config file
 	cmd := exec.CommandContext(ctx, "jq", filter, s.config.XrayConfig)
 	output, err := cmd.Output()
 	if err != nil {
 		// Non-fatal: log but don't block delete
-		s.logger.Warn().Err(err).Str("tag", tag).Str("username", safeUsername).Msg("jq filter failed during remove")
+		s.logger.Warn().Err(err).Str("protocol", protocol).Str("username", safeUsername).Msg("jq filter failed during remove")
 		return nil
 	}
 
@@ -598,7 +581,7 @@ func (s *accountService) removeXrayClient(ctx context.Context, protocol, usernam
 	}
 
 	s.logger.Info().
-		Str("tag", tag).
+		Str("protocol", protocol).
 		Str("username", safeUsername).
 		Msg("xray client removed")
 

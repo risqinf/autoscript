@@ -88,10 +88,11 @@ type BandwidthEntry struct {
 
 // ConfigLink represents a generated configuration link.
 type ConfigLink struct {
-	Protocol string `json:"protocol"`
-	Username string `json:"username"`
-	Link     string `json:"link"`
-	Remark   string `json:"remark,omitempty"`
+	Protocol   string            `json:"protocol"`
+	Username   string            `json:"username"`
+	Link       string            `json:"link"`
+	Remark     string            `json:"remark,omitempty"`
+	Transports map[string]string `json:"transports,omitempty"`
 }
 
 // PortInfo represents available ports for a protocol.
@@ -101,6 +102,11 @@ type PortInfo struct {
 	WSTLS      string `json:"ws_tls,omitempty"`
 	BadVPN     string `json:"badvpn,omitempty"`
 	OpenVPNTCP string `json:"openvpn_tcp,omitempty"`
+	HUHTTP     string `json:"hu_http,omitempty"`
+	HUTLS      string `json:"hu_tls,omitempty"`
+	XHTTPHTTP  string `json:"xhttp_http,omitempty"`
+	XHTTPTLS   string `json:"xhttp_tls,omitempty"`
+	GRPCTLS    string `json:"grpc_tls,omitempty"`
 }
 
 // AccountDisplay represents the full account display with ports and config.

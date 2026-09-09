@@ -72,7 +72,8 @@ curl -X POST https://<domain>/api/accounts/ssh \
   }'
 ```
 **Notes:** 
-- For Xray (`vless`, `vmess`, `trojan`), use `quota` (in GB) instead of `password`. If `secret` is omitted, UUID/password is auto-generated.
+- `quota` (in GB, 0 = unlimited) is supported for all protocols (`ssh`, `vless`, `vmess`, `trojan`).
+- For Xray (`vless`, `vmess`, `trojan`), if `secret` is omitted, UUID/password is auto-generated.
 - `days` must be an integer.
 
 ### Renew — `POST /api/accounts/{protocol}/{username}/renew`
@@ -119,14 +120,14 @@ curl -X POST https://<domain>/api/trials/vmess \
     "limit_ip": 1
   }'
 ```
-*Trials default to quota `10 GB` (if not SSH) and auto-generate credentials.*
+*Trials default to quota `10 GB` (including SSH) and auto-generate credentials.*
 
 ---
 
 ## 4. Config API
 
-### Get Xray Link — `GET /api/config/{protocol}/{username}`
-Returns the direct `vless://` / `vmess://` / `trojan://` link.
+### Get Config Link — `GET /api/config/{protocol}/{username}`
+Returns the primary connection link, remark, and `transports` map (`ws_tls`, `ws_ntls`, `hu_tls`, `hu_ntls`, `xhttp_tls`, `xhttp_ntls`, `grpc_tls`).
 
 ### Get OpenVPN File — `GET /api/config/openvpn/{username}`
 Returns the `.ovpn` file text.
