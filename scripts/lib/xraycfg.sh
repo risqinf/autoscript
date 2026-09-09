@@ -69,12 +69,14 @@ cfg_secret_exists() {
   [[ "${c:-0}" -gt 0 ]]
 }
 
-# Add a client to the inbound for a protocol.
+# Add a client to all inbounds for a protocol (WS, HTTPUpgrade, XHTTP, gRPC).
 # Args: protocol username secret
 cfg_add_client() {
   local proto="$1" user="$2" secret="$3"
-  local tag; tag="$(cfg_tag "$proto")"
-  [[ -z "$tag" ]] && { err "unknown protocol: $proto"; return 1; }
+  case "$proto" in
+    vless|vmess|trojan) ;;
+    *) err "unknown protocol: $proto"; return 1 ;;
+  esac
 
   local client
   case "$proto" in
@@ -84,17 +86,21 @@ cfg_add_client() {
   esac
 
   cfg_apply '
-    (.inbounds[] | select(.tag==$tag) | .settings.clients) += [$client]
-  ' --arg tag "$tag" --argjson client "$client"
+    (.inbounds[] | select(.protocol==$proto and .settings.clients != null) | .settings.clients) += [$client]
+  ' --arg proto "$proto" --argjson client "$client"
 }
 
-# Remove a client (by email) from the inbound for a protocol.
+# Remove a client (by email) from all inbounds for a protocol.
 cfg_del_client() {
   local proto="$1" user="$2"
-  local tag; tag="$(cfg_tag "$proto")"
-  [[ -z "$tag" ]] && { err "unknown protocol: $proto"; return 1; }
+  case "$proto" in
+    vless|vmess|trojan) ;;
+    *) err "unknown protocol: $proto"; return 1 ;;
+  esac
+
   cfg_apply '
-    (.inbounds[] | select(.tag==$tag) | .settings.clients)
+    (.inbounds[] | select(.protocol==$proto and .settings.clients != null) | .settings.clients)
       |= map(select(.email != $u))
-  ' --arg tag "$tag" --arg u "$user"
+  ' --arg proto "$proto" --arg u "$user"
 }
+

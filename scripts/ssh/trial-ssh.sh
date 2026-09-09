@@ -27,15 +27,17 @@ if db_account_exists "ssh" "$user" || id "$user" &>/dev/null; then err "Username
 nologin=$(ensure_nologin_shell); [[ -z "$nologin" ]] && nologin=/usr/sbin/nologin
 useradd -e "$exp_system" -M -N -s "$nologin" "$user" || { err "useradd failed"; exit 1; }
 echo "${user}:${pass}" | chpasswd || { userdel --force "$user" >/dev/null 2>&1; err "chpasswd failed"; exit 1; }
-db_insert_account "ssh" "$user" "$pass" 0 "$limit_ip" "$exp_epoch"
-db_audit "create" "ssh" "$user" "trial ${duration}"
+quota_bytes=$(( 10 * 1073741824 ))
+quota_disp="10 GB"
+db_insert_account "ssh" "$user" "$pass" "$quota_bytes" "$limit_ip" "$exp_epoch"
+db_audit "create" "ssh" "$user" "trial ${duration} quota=10GB"
 
 exp_disp=$(date -d "@${exp_epoch}" +"%Y-%m-%d %H:%M:%S")
 [[ "$limit_ip" == "0" ]] && ip_disp="Unlimited" || ip_disp="$limit_ip"
 
-tg_send "$(ssh_tg_text "$user" "$pass" "$ip_disp" "$exp_disp" "SSH TRIAL ACCOUNT")"
+tg_send "$(ssh_tg_text "$user" "$pass" "$ip_disp" "$exp_disp" "$quota_disp" "SSH TRIAL ACCOUNT")"
 
 clear
-ssh_print_cli "$user" "$pass" "$ip_disp" "$exp_disp" "SSH TRIAL CREATED"
+ssh_print_cli "$user" "$pass" "$ip_disp" "$exp_disp" "$quota_disp" "SSH TRIAL CREATED"
 read -n 1 -s -r -p " Press any key to back to menu..."
 menu

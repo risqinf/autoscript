@@ -81,10 +81,13 @@ acc_xray_renew() {
 
 # ---- SSH ACCOUNTS ----
 acc_ssh_create() {
-  local user="$1" pass="$2" limit_ip="$3" days="$4"
-  local exp_epoch exp_system
+  local user="$1" pass="$2" limit_ip="$3" days="$4" quota_gb="${5:-0}"
+  local exp_epoch exp_system quota_bytes=0
   exp_epoch=$(( $(date +%s) + days * 86400 ))
   exp_system=$(date -d "@${exp_epoch}" +%Y-%m-%d)
+  if [[ -n "$quota_gb" && "$quota_gb" =~ ^[0-9]+$ && "$quota_gb" -gt 0 ]]; then
+    quota_bytes=$(( quota_gb * 1073741824 ))
+  fi
 
   if db_account_exists "ssh" "$user" || id "$user" &>/dev/null; then
     err "username '$user' already exists"; return 9
@@ -93,8 +96,8 @@ acc_ssh_create() {
   nologin=$(ensure_nologin_shell); [[ -z "$nologin" ]] && nologin=/usr/sbin/nologin
   useradd -e "$exp_system" -M -N -s "$nologin" "$user" || { err "useradd failed"; return 1; }
   echo "${user}:${pass}" | chpasswd || { userdel --force "$user" >/dev/null 2>&1; err "chpasswd failed"; return 1; }
-  db_insert_account "ssh" "$user" "$pass" 0 "$limit_ip" "$exp_epoch"
-  db_audit "create" "ssh" "$user" "ip=${limit_ip} days=${days}"
+  db_insert_account "ssh" "$user" "$pass" "$quota_bytes" "$limit_ip" "$exp_epoch"
+  db_audit "create" "ssh" "$user" "ip=${limit_ip} days=${days} quota=${quota_gb}GB"
   return 0
 }
 
@@ -124,14 +127,26 @@ acc_ssh_renew() {
 }
 
 # ---- SHARED DISPLAY HELPERS ----
-# Full SSH account detail to the terminal. Args: user pass ip_disp exp_disp [title]
+# Full SSH account detail to the terminal. Args: user pass ip_disp exp_disp [quota_disp] [title]
 ssh_print_cli() {
-  local user="$1" pass="$2" ip_disp="$3" exp_disp="$4" title="${5:-SSH ACCOUNT}"
+  local user="$1" pass="$2" ip_disp="$3" exp_disp="$4"
+  local quota_disp="Unlimited" title="SSH ACCOUNT"
+  if [[ $# -ge 6 ]]; then
+    quota_disp="$5"
+    title="$6"
+  elif [[ $# -eq 5 ]]; then
+    if [[ "$5" == *"GB"* || "$5" == *"MB"* || "$5" == "Unlimited" ]]; then
+      quota_disp="$5"
+    else
+      title="$5"
+    fi
+  fi
   local d; d=$(get_domain); local sip; sip=$(get_ip)
   ui_header "$title"
   ui_kv "Username"  "$user" "$CYAN"
   ui_kv "Password"  "$pass" "$CYAN"
   ui_kv "Host / IP" "${d} / ${sip}"
+  ui_kv "Quota"     "$quota_disp"
   ui_kv "Limit IP"  "$ip_disp"
   ui_kv "Expired"   "$exp_disp"
   ui_rule
@@ -153,9 +168,20 @@ ssh_print_cli() {
   ui_foot
 }
 
-# Full SSH account detail as Telegram HTML. Args: user pass ip_disp exp_disp [title]
+# Full SSH account detail as Telegram HTML. Args: user pass ip_disp exp_disp [quota_disp] [title]
 ssh_tg_text() {
-  local user="$1" pass="$2" ip_disp="$3" exp_disp="$4" title="${5:-SSH ACCOUNT}"
+  local user="$1" pass="$2" ip_disp="$3" exp_disp="$4"
+  local quota_disp="Unlimited" title="SSH ACCOUNT"
+  if [[ $# -ge 6 ]]; then
+    quota_disp="$5"
+    title="$6"
+  elif [[ $# -eq 5 ]]; then
+    if [[ "$5" == *"GB"* || "$5" == *"MB"* || "$5" == "Unlimited" ]]; then
+      quota_disp="$5"
+    else
+      title="$5"
+    fi
+  fi
   local d; d=$(get_domain); local sip; sip=$(get_ip)
   cat <<EOF
 <b>━━━━━━━━━━━━━━━━━━━━━━━━━━━</b>
@@ -164,6 +190,7 @@ ssh_tg_text() {
 <b>Username  :</b> <code>${user}</code>
 <b>Password  :</b> <code>${pass}</code>
 <b>Host/IP   :</b> <code>${d}</code> / <code>${sip}</code>
+<b>Quota     :</b> <code>${quota_disp}</code>
 <b>Limit IP  :</b> <code>${ip_disp}</code>
 <b>Expired   :</b> <code>${exp_disp}</code>
 <b>━━━━━━━━━━━━━━━━━━━━━━━━━━━</b>
@@ -187,12 +214,13 @@ EOF
 }
 
 # ---- XRAY TELEGRAM MESSAGE BUILDER (shared by add-* and add-bulk) ----
-# Build a vmess:// share link (base64 JSON). Args: ps add id port tls
+# Build a vmess:// share link (base64 JSON). Args: ps add id port tls [net] [path]
 _vmess_link() {
-  local ps="$1" add="$2" id="$3" port="$4" tls="$5"
+  local ps="$1" add="$2" id="$3" port="$4" tls="$5" net="${6:-ws}" path="${7:-/}"
   jq -nc --arg ps "$ps" --arg add "$add" --arg port "$port" \
         --arg id "$id" --arg host "$add" --arg tls "$tls" \
-        '{v:"2",ps:$ps,add:$add,port:$port,id:$id,aid:"0",net:"ws",path:"/",type:"none",host:$host,tls:$tls}' \
+        --arg net "$net" --arg path "$path" \
+        '{v:"2",ps:$ps,add:$add,port:$port,id:$id,aid:"0",net:$net,path:$path,type:"none",host:$host,tls:$tls,sni:$add}' \
     | base64 -w 0 | sed 's/^/vmess:\/\//'
 }
 
@@ -414,7 +442,15 @@ xray_cek_monitor() {
     ui_kv "Bandwidth" "${usedd} / ${quotad}"
     ui_kv "Expired" "$exp"
     printf " ${WHITE}%-12s${NC} :\n" "Active IPs"
-    while read -r one; do [[ -n "$one" ]] && echo -e "                ${GREEN}- ${one}${NC}"; done <<< "$ips"
+    while read -r one; do
+      [[ -z "$one" ]] && continue
+      local geo asn_isp loc
+      geo=$(lookup_ip_geo "$one")
+      asn_isp="${geo%%|*}"
+      loc="${geo#*|}"
+      echo -e "                ${GREEN}- ${one}${NC} ${YELLOW}[ ${asn_isp} ]${NC}"
+      [[ -n "$loc" && "$loc" != "Unknown Location" ]] && echo -e "                  ${CYAN}${loc}${NC}"
+    done <<< "$ips"
     if [[ "$ipcol" == "$RED" ]]; then
       echo -e "                ${RED}[!] EXCEEDS IP LIMIT${NC}"
     fi

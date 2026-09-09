@@ -161,11 +161,28 @@ tram=$(free -m | awk 'NR==2 {print $2}')
 up=$(uptime -p | sed 's/up //')
 OS1=$(. /etc/os-release 2>/dev/null && echo "$PRETTY_NAME" || echo "Unknown OS")
 f1=$(. /etc/os-release 2>/dev/null && echo "$VERSION_ID" || echo "N/A")
-frem=$(free -h | grep "Mem:" | awk '{print $3 "/" $2}')
-freswp=$(free -h | grep "Swap:" | awk '{print $3 "/" $2}')
-cpu=$(top -bn1 | grep "Cpu(s)" | awk '{print $8"% idle"}')
+frem=$(get_ram_info)
+freswp=$(free -h 2>/dev/null | grep "Swap:" | awk '{print $3 "/" $2}' || echo "N/A")
+cpu=$(get_cpu_usage)
 xray_version=$(xray version 2>/dev/null | awk 'NR==1 {print $1, $2}' || echo "Not Installed")
-IPVPS=$(curl -s ifconfig.me 2>/dev/null || echo "N/A")
+IPVPS=$(curl -s --max-time 3 ifconfig.me 2>/dev/null || echo "N/A")
+
+menu_rdns_soon() {
+    clear
+    ui_header "RDNS CLIENT (ENCRYPTED TUNNEL)"
+    echo ""
+    ui_kv "Status" "COMING SOON (Private Feature)" "$YELLOW"
+    ui_kv "Type"   "Stealth DNS / TCP Reverse Tunnel" "$CYAN"
+    echo ""
+    echo -e " ${WHITE}RDNS Client is a high-security DNS/TCP stealth${NC}"
+    echo -e " ${WHITE}tunneling daemon designed for extreme bypass.${NC}"
+    echo -e " ${WHITE}This feature is currently under private development${NC}"
+    echo -e " ${WHITE}and will be available as an exclusive add-on.${NC}"
+    echo ""
+    ui_rule
+    read -n 1 -s -r -p " Press any key to return to menu..."
+    menu
+}
 
 # --- MAIN MENU ---
 clear
@@ -178,7 +195,7 @@ ui_kv "RAM"      "$frem"
 ui_kv "CPU"      "$cpu"
 ui_kv "Traffic"  "$ttoday / $tyest / $tmon  (day/yest/mon)"
 ui_rule
-printf " ${WHITE}%-12s${NC} ${CYAN}:${NC} SSH ${GREEN}%s${NC}   VLESS ${GREEN}%s${NC}   VMESS ${GREEN}%s${NC}   TROJAN ${GREEN}%s${NC}\n" "Accounts" "$ssh1" "$vls" "$vms" "$tro"
+printf " ${WHITE}%-12s${NC} ${CYAN}:${NC} SSH ${PINK}[${GREEN}%s${PINK}]${NC}  VLESS ${PINK}[${GREEN}%s${PINK}]${NC}  VMESS ${PINK}[${GREEN}%s${PINK}]${NC}  TROJAN ${PINK}[${GREEN}%s${PINK}]${NC}\n" "Accounts" "$ssh1" "$vls" "$vms" "$tro"
 ui_rule
 ui_label "SERVICES"
 ui_status "SSH + WS"  "$resshws"
@@ -191,15 +208,16 @@ ui_status "API"       "$resapi"
 ui_rule
 ui_label "ACCOUNT PANELS"
 ui_opt 1 "SSH / OpenVPN Panel"
-ui_opt 2 "VLESS Panel"
-ui_opt 3 "VMESS Panel"
-ui_opt 4 "TROJAN Panel"
+ui_opt 2 "VLESS Panel (WS/HU/XHTTP/gRPC)"
+ui_opt 3 "VMESS Panel (WS/HU/XHTTP/gRPC)"
+ui_opt 4 "TROJAN Panel (WS/HU/XHTTP/gRPC)"
 ui_rule
 ui_label "TOOLS"
 ui_opt 5 "Auto Bulk Create"
 ui_opt 6 "Account Cleaner"
 ui_opt 7 "User Checker"
 ui_opt 8 "API Menu"
+ui_opt 11 "RDNS Client (Private Tunnel) ${YELLOW}[SOON]${NC}"
 ui_rule
 ui_label "SERVER"
 ui_opt 9  "System Menu"
@@ -222,6 +240,7 @@ case $mm in
 8) clear ; run_cc ; menu-api ;;
 9) clear ; run_cc ; menu-system ;;
 10) clear ; run_cc ; menu-backup ;;
+11) clear ; run_cc ; menu_rdns_soon ;;
 x|X) clear ; exit 0 ;;
 00) clear ; run_cc ; change-banner ;;
 *) echo "Invalid option, please try again." ; sleep 1 ; menu ;;

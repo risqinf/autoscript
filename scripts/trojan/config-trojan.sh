@@ -29,20 +29,32 @@ ip=$(db_get_field "trojan" "$user" "limit_ip"); [[ "$ip" == "0" ]] && ip="Unlimi
 qb=$(db_get_field "trojan" "$user" "quota_bytes")
 [[ "$qb" == "0" ]] && quota="Unlimited" || quota="$(( qb / 1073741824 )) GB"
 
-trojanlink1="trojan://${secret}@${domain}:443?type=ws&security=tls&host=${domain}&path=/trojan&sni=${domain}#${user}"
+trojan_ws_tls="trojan://${secret}@${domain}:443?type=ws&security=tls&host=${domain}&path=/trojan&sni=${domain}#${user}-WS-TLS"
+trojan_hu_tls="trojan://${secret}@${domain}:443?type=httpupgrade&security=tls&host=${domain}&path=/trojan-hu&sni=${domain}#${user}-HU-TLS"
+trojan_xhttp_tls="trojan://${secret}@${domain}:443?type=xhttp&security=tls&host=${domain}&path=/trojan-xhttp&mode=auto&sni=${domain}#${user}-XHTTP-TLS"
+trojan_grpc_tls="trojan://${secret}@${domain}:443?type=grpc&security=tls&serviceName=trojan-grpc&sni=${domain}#${user}-gRPC"
 
 clear
 ui_header "TROJAN ACCOUNT DETAILS"
 echo -e " Remarks      : ${user}"
 echo -e " Host/IP      : ${domain}"
 echo -e " Port TLS     : 443"
-echo -e " Key          : ${secret}"
-echo -e " Network/Path : ws  /trojan"
+echo -e " Key/Password : ${secret}"
+echo -e " Transports   : WS, HTTPUpgrade, XHTTP, gRPC"
 echo -e " Quota        : ${quota}     Limit IP : ${ip}"
 echo -e " Expired      : ${exp}"
 ui_rule
-echo -e " Link TLS  :"
-echo -e " ${trojanlink1}"
+echo -e " ${WHITE}── Link WebSocket (TLS) ──${NC}"
+echo -e " ${trojan_ws_tls}"
+ui_rule
+echo -e " ${WHITE}── Link HTTPUpgrade (TLS) ──${NC}"
+echo -e " ${trojan_hu_tls}"
+ui_rule
+echo -e " ${WHITE}── Link XHTTP / SplitHTTP (TLS) ──${NC}"
+echo -e " ${trojan_xhttp_tls}"
+ui_rule
+echo -e " ${WHITE}── Link gRPC (TLS) ──${NC}"
+echo -e " ${trojan_grpc_tls}"
 ui_rule
 read -n 1 -s -r -p " Press any key to back to menu..."
 menu

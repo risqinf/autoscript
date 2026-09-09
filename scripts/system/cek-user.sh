@@ -34,11 +34,11 @@ while IFS='|' read -r proto secret iplim qb exp status; do
   [[ -z "$proto" ]] && continue
   found=1
   [[ "$iplim" == "0" ]] && iplim="Unlimited"
+  [[ "$qb" == "0" || -z "$qb" ]] && quota="Unlimited" || quota="$(( qb / 1073741824 )) GB"
   if [[ "$proto" == "ssh" ]]; then
-    ssh_print_cli "$user" "$secret" "$iplim" "$exp" "SSH ACCOUNT ($status)"
+    ssh_print_cli "$user" "$secret" "$iplim" "$exp" "$quota" "SSH ACCOUNT ($status)"
     continue
   fi
-  [[ "$qb" == "0" ]] && quota="Unlimited" || quota="$(( qb / 1073741824 )) GB"
   ui_header "${proto^^} ACCOUNT (${status})"
   ui_kv "Remarks"   "$user" "$CYAN"
   ui_kv "Host / IP" "$domain"

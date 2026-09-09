@@ -583,6 +583,15 @@ xray_install_logic() {
           }
         ]
       },
+      "sniffing": {
+        "enabled": true,
+        "destOverride": [
+          "http",
+          "tls",
+          "quic"
+        ],
+        "routeOnly": false
+      },
       "streamSettings": {
         "network": "ws",
         "wsSettings": {
@@ -601,6 +610,15 @@ xray_install_logic() {
             "password": "${uuid}"
           }
         ]
+      },
+      "sniffing": {
+        "enabled": true,
+        "destOverride": [
+          "http",
+          "tls",
+          "quic"
+        ],
+        "routeOnly": false
       },
       "streamSettings": {
         "network": "ws",
@@ -622,10 +640,280 @@ xray_install_logic() {
           }
         ]
       },
+      "sniffing": {
+        "enabled": true,
+        "destOverride": [
+          "http",
+          "tls",
+          "quic"
+        ],
+        "routeOnly": false
+      },
       "streamSettings": {
         "network": "ws",
         "wsSettings": {
           "path": "/"
+        }
+      }
+    },
+    {
+      "tag": "vless-hu",
+      "listen": "127.0.0.1",
+      "port": 10011,
+      "protocol": "vless",
+      "settings": {
+        "decryption": "none",
+        "clients": [
+          {
+            "id": "${uuid}"
+          }
+        ]
+      },
+      "sniffing": {
+        "enabled": true,
+        "destOverride": [
+          "http",
+          "tls",
+          "quic"
+        ],
+        "routeOnly": false
+      },
+      "streamSettings": {
+        "network": "httpupgrade",
+        "httpupgradeSettings": {
+          "path": "/vless-hu"
+        }
+      }
+    },
+    {
+      "tag": "trojan-hu",
+      "listen": "127.0.0.1",
+      "port": 10012,
+      "protocol": "trojan",
+      "settings": {
+        "clients": [
+          {
+            "password": "${uuid}"
+          }
+        ]
+      },
+      "sniffing": {
+        "enabled": true,
+        "destOverride": [
+          "http",
+          "tls",
+          "quic"
+        ],
+        "routeOnly": false
+      },
+      "streamSettings": {
+        "network": "httpupgrade",
+        "httpupgradeSettings": {
+          "path": "/trojan-hu"
+        }
+      }
+    },
+    {
+      "tag": "vmess-hu",
+      "listen": "127.0.0.1",
+      "port": 10013,
+      "protocol": "vmess",
+      "settings": {
+        "clients": [
+          {
+            "id": "${uuid}",
+            "alterId": 0
+          }
+        ]
+      },
+      "sniffing": {
+        "enabled": true,
+        "destOverride": [
+          "http",
+          "tls",
+          "quic"
+        ],
+        "routeOnly": false
+      },
+      "streamSettings": {
+        "network": "httpupgrade",
+        "httpupgradeSettings": {
+          "path": "/vmess-hu"
+        }
+      }
+    },
+    {
+      "tag": "vless-xhttp",
+      "listen": "127.0.0.1",
+      "port": 10021,
+      "protocol": "vless",
+      "settings": {
+        "decryption": "none",
+        "clients": [
+          {
+            "id": "${uuid}"
+          }
+        ]
+      },
+      "sniffing": {
+        "enabled": true,
+        "destOverride": [
+          "http",
+          "tls",
+          "quic"
+        ],
+        "routeOnly": false
+      },
+      "streamSettings": {
+        "network": "xhttp",
+        "xhttpSettings": {
+          "path": "/vless-xhttp",
+          "mode": "auto"
+        }
+      }
+    },
+    {
+      "tag": "trojan-xhttp",
+      "listen": "127.0.0.1",
+      "port": 10022,
+      "protocol": "trojan",
+      "settings": {
+        "clients": [
+          {
+            "password": "${uuid}"
+          }
+        ]
+      },
+      "sniffing": {
+        "enabled": true,
+        "destOverride": [
+          "http",
+          "tls",
+          "quic"
+        ],
+        "routeOnly": false
+      },
+      "streamSettings": {
+        "network": "xhttp",
+        "xhttpSettings": {
+          "path": "/trojan-xhttp",
+          "mode": "auto"
+        }
+      }
+    },
+    {
+      "tag": "vmess-xhttp",
+      "listen": "127.0.0.1",
+      "port": 10023,
+      "protocol": "vmess",
+      "settings": {
+        "clients": [
+          {
+            "id": "${uuid}",
+            "alterId": 0
+          }
+        ]
+      },
+      "sniffing": {
+        "enabled": true,
+        "destOverride": [
+          "http",
+          "tls",
+          "quic"
+        ],
+        "routeOnly": false
+      },
+      "streamSettings": {
+        "network": "xhttp",
+        "xhttpSettings": {
+          "path": "/vmess-xhttp",
+          "mode": "auto"
+        }
+      }
+    },
+    {
+      "tag": "vless-grpc",
+      "listen": "127.0.0.1",
+      "port": 10031,
+      "protocol": "vless",
+      "settings": {
+        "decryption": "none",
+        "clients": [
+          {
+            "id": "${uuid}"
+          }
+        ]
+      },
+      "sniffing": {
+        "enabled": true,
+        "destOverride": [
+          "http",
+          "tls",
+          "quic"
+        ],
+        "routeOnly": false
+      },
+      "streamSettings": {
+        "network": "grpc",
+        "grpcSettings": {
+          "serviceName": "vless-grpc"
+        }
+      }
+    },
+    {
+      "tag": "trojan-grpc",
+      "listen": "127.0.0.1",
+      "port": 10032,
+      "protocol": "trojan",
+      "settings": {
+        "clients": [
+          {
+            "password": "${uuid}"
+          }
+        ]
+      },
+      "sniffing": {
+        "enabled": true,
+        "destOverride": [
+          "http",
+          "tls",
+          "quic"
+        ],
+        "routeOnly": false
+      },
+      "streamSettings": {
+        "network": "grpc",
+        "grpcSettings": {
+          "serviceName": "trojan-grpc"
+        }
+      }
+    },
+    {
+      "tag": "vmess-grpc",
+      "listen": "127.0.0.1",
+      "port": 10033,
+      "protocol": "vmess",
+      "settings": {
+        "clients": [
+          {
+            "id": "${uuid}",
+            "alterId": 0
+          }
+        ]
+      },
+      "sniffing": {
+        "enabled": true,
+        "destOverride": [
+          "http",
+          "tls",
+          "quic"
+        ],
+        "routeOnly": false
+      },
+      "streamSettings": {
+        "network": "grpc",
+        "grpcSettings": {
+          "serviceName": "vmess-grpc"
         }
       }
     }
@@ -842,6 +1130,36 @@ upstream trojan_ws {
     keepalive 32;
 }
 
+upstream vless_hu {
+    server 127.0.0.1:10011;
+    keepalive 32;
+}
+
+upstream trojan_hu {
+    server 127.0.0.1:10012;
+    keepalive 32;
+}
+
+upstream vmess_hu {
+    server 127.0.0.1:10013;
+    keepalive 32;
+}
+
+upstream vless_xhttp {
+    server 127.0.0.1:10021;
+    keepalive 32;
+}
+
+upstream trojan_xhttp {
+    server 127.0.0.1:10022;
+    keepalive 32;
+}
+
+upstream vmess_xhttp {
+    server 127.0.0.1:10023;
+    keepalive 32;
+}
+
 # Proper Connection header for WebSocket upgrades.
 map \$http_upgrade \$connection_upgrade {
     default upgrade;
@@ -864,9 +1182,7 @@ server {
     listen 127.0.0.1:81 default_server proxy_protocol;
     server_name ${domain};
 
-    # Explicit protocol paths. Each uses a static proxy_pass (no variables) so
-    # nginx resolves the upstream block directly (a variable in proxy_pass would
-    # bypass the upstream and require a DNS resolver).
+    # Explicit protocol paths.
     location /vless {
         if (\$http_upgrade != "websocket") { return 444; }
         proxy_pass http://vless_ws;
@@ -879,6 +1195,83 @@ server {
         proxy_read_timeout 7d;
         proxy_send_timeout 7d;
         proxy_buffering off;
+    }
+
+    # HTTPUpgrade paths
+    location /vless-hu {
+        proxy_pass http://vless_hu;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade \$http_upgrade;
+        proxy_set_header Connection \$connection_upgrade;
+        proxy_set_header Host \$http_host;
+        proxy_set_header X-Real-IP \$remote_addr;
+        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+        proxy_read_timeout 7d;
+        proxy_send_timeout 7d;
+        proxy_buffering off;
+    }
+
+    location /vmess-hu {
+        proxy_pass http://vmess_hu;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade \$http_upgrade;
+        proxy_set_header Connection \$connection_upgrade;
+        proxy_set_header Host \$http_host;
+        proxy_set_header X-Real-IP \$remote_addr;
+        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+        proxy_read_timeout 7d;
+        proxy_send_timeout 7d;
+        proxy_buffering off;
+    }
+
+    location /trojan-hu {
+        proxy_pass http://trojan_hu;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade \$http_upgrade;
+        proxy_set_header Connection \$connection_upgrade;
+        proxy_set_header Host \$http_host;
+        proxy_set_header X-Real-IP \$remote_addr;
+        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+        proxy_read_timeout 7d;
+        proxy_send_timeout 7d;
+        proxy_buffering off;
+    }
+
+    # XHTTP (SplitHTTP) paths
+    location /vless-xhttp {
+        proxy_pass http://vless_xhttp;
+        proxy_http_version 1.1;
+        proxy_set_header Host \$http_host;
+        proxy_set_header X-Real-IP \$remote_addr;
+        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+        proxy_read_timeout 7d;
+        proxy_send_timeout 7d;
+        proxy_buffering off;
+        client_max_body_size 0;
+    }
+
+    location /vmess-xhttp {
+        proxy_pass http://vmess_xhttp;
+        proxy_http_version 1.1;
+        proxy_set_header Host \$http_host;
+        proxy_set_header X-Real-IP \$remote_addr;
+        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+        proxy_read_timeout 7d;
+        proxy_send_timeout 7d;
+        proxy_buffering off;
+        client_max_body_size 0;
+    }
+
+    location /trojan-xhttp {
+        proxy_pass http://trojan_xhttp;
+        proxy_http_version 1.1;
+        proxy_set_header Host \$http_host;
+        proxy_set_header X-Real-IP \$remote_addr;
+        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+        proxy_read_timeout 7d;
+        proxy_send_timeout 7d;
+        proxy_buffering off;
+        client_max_body_size 0;
     }
 
     # Explicit /vmess path: silently reject scanners. VMESS clients use "/"
@@ -941,9 +1334,6 @@ server {
     }
 
     # VMESS multipath (any other path) OR SSH-WS, decided by the handshake.
-    # Any non-protocol path is rewritten to "/" for the vmess inbound.
-    # Use regex match (!~*) instead of exact equality (!=) to support dual-payload.
-    # SSH-WebSocket clients that may send additional tokens in the Upgrade header.
     location / {
         if (\$http_upgrade !~* "websocket") { return 444; }
         rewrite ^.*\$ / break;
@@ -957,6 +1347,33 @@ server {
         proxy_read_timeout 7d;
         proxy_send_timeout 7d;
         proxy_buffering off;
+    }
+}
+
+# Dedicated HTTP/2 server block for gRPC
+server {
+    listen 127.0.0.1:82 default_server proxy_protocol http2;
+    server_name ${domain};
+
+    location ^~ /vless-grpc {
+        grpc_pass grpc://127.0.0.1:10031;
+        grpc_read_timeout 7d;
+        grpc_send_timeout 7d;
+        grpc_set_header X-Real-IP \$remote_addr;
+    }
+
+    location ^~ /trojan-grpc {
+        grpc_pass grpc://127.0.0.1:10032;
+        grpc_read_timeout 7d;
+        grpc_send_timeout 7d;
+        grpc_set_header X-Real-IP \$remote_addr;
+    }
+
+    location ^~ /vmess-grpc {
+        grpc_pass grpc://127.0.0.1:10033;
+        grpc_read_timeout 7d;
+        grpc_send_timeout 7d;
+        grpc_set_header X-Real-IP \$remote_addr;
     }
 }
 EOF
@@ -1002,30 +1419,33 @@ defaults
     timeout client 30m
     timeout server 30m
 
-# Plain HTTP on :80 -> nginx (WS over HTTP, ACME, downloads).
+# Plain HTTP on :80 -> nginx (WS/HU/XHTTP over HTTP, ACME, downloads).
 frontend http_in
     bind *:80
     mode tcp
     default_backend nginx_http
 
-# TLS on :443. HAProxy terminates TLS (one cert, any SNI), then splits traffic
-# by the FIRST decrypted bytes:
-#   * starts with an HTTP method  -> WebSocket/HTTP stack (nginx -> xray/ssh-ws)
-#   * anything else (raw SSH)      -> Dropbear directly  == SSH "SSL/TLS" / "SNI"
-# This lets one 443 port serve BOTH SSH-WebSocket AND SSH-SSL/SNI direct tunnels
-# alongside VMESS/VLESS/Trojan.
+# TLS on :443 with ALPN (h2,http/1.1).
+# HAProxy terminates TLS, then splits traffic:
+#   * ALPN h2 (gRPC)              -> nginx HTTP/2 backend (:82)
+#   * starts with HTTP method     -> nginx HTTP/1.1 backend (:81)
+#   * anything else (raw SSH)     -> Dropbear directly (:109)
 frontend tls_in
-    bind *:443 ssl crt /etc/haproxy/haproxy.pem
+    bind *:443 ssl crt /etc/haproxy/haproxy.pem alpn h2,http/1.1
     mode tcp
     tcp-request inspect-delay 5s
+    # Detect HTTP/2 ALPN
+    acl is_h2 ssl_fc_alpn -i h2
     # Detect an HTTP request line in the decrypted payload.
     acl is_http req.payload(0,10) -m reg -i ^(GET|POST|HEAD|PUT|OPTIONS|DELETE|PATCH|TRACE|CONNECT)
-    # Proceed as soon as the client sends any bytes; otherwise fall through after
-    # the inspect-delay (SSH servers greet first, so SSH-SSL may send nothing).
     tcp-request content accept if { req.len gt 0 }
+    use_backend nginx_h2 if is_h2
     use_backend nginx_http if is_http
-    # Default: treat as raw SSH inside TLS -> Dropbear (SSH-SSL / SNI tunneling).
     default_backend ssh_direct
+
+backend nginx_h2
+    mode tcp
+    server nginx_h2_node 127.0.0.1:82 send-proxy check
 
 backend nginx_http
     mode tcp
@@ -1033,7 +1453,6 @@ backend nginx_http
 
 backend ssh_direct
     mode tcp
-    # No send-proxy: Dropbear does not speak the PROXY protocol.
     server dropbear_node 127.0.0.1:109 check
 EOF
   systemctl enable haproxy --now >/dev/null 2>&1

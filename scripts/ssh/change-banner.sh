@@ -119,17 +119,31 @@ read_banner_input() {
 }
 
 # ─────────────────────────────────────────────────────────────
-# Option 1 — Set a new banner (interactive input)
+# Option 1 — Set a new banner (Input -> Paste -> Confirm)
 # ─────────────────────────────────────────────────────────────
 do_set_banner() {
-    show_current_banner
+    clear
+    ui_header "INPUT / PASTE SSH BANNER"
     echo ""
-    echo -e " ${YELLOW}You are about to replace the SSH WebSocket banner.${NC}"
+    echo -e " ${WHITE}Paste your banner content below.${NC}"
+    echo -e " ${CYAN}─ Supports Plain Text, HTML (<font color=...>), and Emoji.${NC}"
+    echo -e " ${YELLOW}─ When finished pasting, type ${WHITE}END${YELLOW} on a new line and press Enter:${NC}"
+    ui_rule
+    echo ""
+
+    local lines=()
+    local line
+    while IFS= read -r line || [[ -n "$line" ]]; do
+        if [[ "${line^^}" == "END" ]]; then
+            break
+        fi
+        lines+=("$line")
+    done
 
     local new_banner
-    new_banner="$(read_banner_input)"
+    new_banner="$(printf '%s\n' "${lines[@]}")"
+    new_banner="$(echo "$new_banner" | sed -e 's/[[:space:]]*$//' | awk 'BEGIN{ORS="\n"} /[^[:space:]]/{found=1} found{print}')"
 
-    echo ""
     if ! validate_banner "$new_banner"; then
         echo ""
         read -n 1 -s -r -p " Press any key to return..."
@@ -137,20 +151,21 @@ do_set_banner() {
         return
     fi
 
-    # Preview
+    # Preview & Confirm
+    clear
+    ui_header "BANNER PREVIEW"
     echo ""
     ui_rule
-    echo -e " ${WHITE}Preview of new banner:${NC}"
-    ui_rule
-    echo "$new_banner"
+    echo -e "$new_banner"
     ui_rule
     echo ""
-    read -rp " $(echo -e "${YELLOW}Apply this banner? [y/N]:${NC} ")" confirm
+    read -rp " $(echo -e "${YELLOW}Apply and save this banner? [y/N]:${NC} ")" confirm
     case "${confirm,,}" in
         y|yes)
             write_banner "$new_banner"
+            systemctl restart dropbear ssh-ws >/dev/null 2>&1 || true
             echo ""
-            ok "Banner updated successfully → ${BANNER_FILE}"
+            ok "Banner updated and applied successfully! (/etc/issue.net)"
             [[ -f "$BANNER_BACKUP" ]] && info "Previous banner backed up to ${BANNER_BACKUP}"
             ;;
         *)
@@ -189,6 +204,7 @@ do_restore_banner() {
         y|yes)
             cp -f "$BANNER_BACKUP" "$BANNER_FILE"
             chmod 644 "$BANNER_FILE"
+            systemctl restart dropbear ssh-ws >/dev/null 2>&1 || true
             ok "Banner restored from backup."
             ;;
         *)
@@ -213,11 +229,10 @@ do_clear_banner() {
     read -rp " $(echo -e "${YELLOW}Proceed? [y/N]:${NC} ")" confirm
     case "${confirm,,}" in
         y|yes)
-            # Backup first
             [[ -f "$BANNER_FILE" ]] && cp -f "$BANNER_FILE" "$BANNER_BACKUP" 2>/dev/null || true
-            local default_banner
-            default_banner="Welcome to Autoscript VPN"
+            local default_banner="Welcome to Autoscript VPN"
             write_banner "$default_banner"
+            systemctl restart dropbear ssh-ws >/dev/null 2>&1 || true
             ok "Banner reset to default."
             [[ -f "$BANNER_BACKUP" ]] && info "Previous banner backed up to ${BANNER_BACKUP}"
             ;;
@@ -239,7 +254,6 @@ change_banner() {
     ui_header "CHANGE SSH WEBSOCKET BANNER"
     echo ""
 
-    # Show status of current banner
     if [[ -f "$BANNER_FILE" && -s "$BANNER_FILE" ]]; then
         local line_count char_count
         line_count=$(wc -l < "$BANNER_FILE")
@@ -253,12 +267,12 @@ change_banner() {
     [[ -f "$BANNER_BACKUP" ]] && ui_kv "Backup" "${BANNER_BACKUP} (available)"
 
     ui_rule
-    ui_opt 1 "Set / Replace banner  (type or paste new banner)"
-    ui_opt 2 "View current banner"
-    ui_opt 3 "Restore from backup"
-    ui_opt 4 "Reset to default banner"
+    ui_opt 1 "Input & Paste New Banner"
+    ui_opt 2 "View Current Banner"
+    ui_opt 3 "Restore From Backup"
+    ui_opt 4 "Reset to Default Banner"
     ui_rule
-    ui_opt 0 "Back"
+    ui_opt 0 "Back to SSH Menu"
     ui_foot
     read -rp " Select option : " opt
     case "$opt" in
@@ -272,3 +286,4 @@ change_banner() {
 }
 
 change_banner
+

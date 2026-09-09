@@ -164,10 +164,26 @@ if [[ ${#ACTIVEPORT[@]} -eq 0 ]]; then
   done < <(ss -tn state established 2>/dev/null | grep ":${DROPBEAR_PORT}$\|:${DROPBEAR_PORT} ")
 fi
 
+to_bytes() {
+  local s="$1" num unit
+  [[ -z "$s" || "$s" == "-" ]] && { echo 0; return; }
+  num=$(echo "$s" | awk '{print $1}')
+  unit=$(echo "$s" | awk '{print toupper($2)}')
+  case "$unit" in
+    TB) awk -v n="$num" 'BEGIN{printf "%.0f", n*1099511627776}' ;;
+    GB) awk -v n="$num" 'BEGIN{printf "%.0f", n*1073741824}' ;;
+    MB) awk -v n="$num" 'BEGIN{printf "%.0f", n*1048576}' ;;
+    KB) awk -v n="$num" 'BEGIN{printf "%.0f", n*1024}' ;;
+    *)  echo "${num%.*}" ;;
+  esac
+}
+
 clear
 ui_header "SSH LIVE SESSION MONITOR"
 
-declare -A USER_SESS
+declare -A USER_SESSIONS
+declare -A USER_SESS_CNT
+declare -A USER_LIVE_BYTES
 total_live=0
 
 # Iterate active proxy-ports, correlate to user + bandwidth.
@@ -199,48 +215,104 @@ for pport in "${!ACTIVEPORT[@]}"; do
     [[ -z "$up" ]] && up="-"
   fi
 
-  if [[ "$tx" == "-" && "$rx" == "-" ]]; then
-    bw_display="Live (Direct/SSL)"
-  else
-    bw_display="TX ${tx} | RX ${rx} | Total ${tot}"
-  fi
-
-  USER_SESS[$user]=$(( ${USER_SESS[$user]:-0} + 1 ))
+  USER_SESS_CNT[$user]=$(( ${USER_SESS_CNT[$user]:-0} + 1 ))
+  b_tot=$(to_bytes "$tot")
+  USER_LIVE_BYTES[$user]=$(( ${USER_LIVE_BYTES[$user]:-0} + b_tot ))
   total_live=$((total_live+1))
-  ui_rule
-  ui_kv "Username"  "$user" "$CYAN"
-  ui_kv "Client IP" "$cip"
-  ui_kv "Uptime"    "$up"
-  ui_kv "Bandwidth" "$bw_display"
+
+  # Record per-session line
+  if [[ -n "${USER_SESSIONS[$user]}" ]]; then
+    USER_SESSIONS[$user]="${USER_SESSIONS[$user]}"$'\n'"${cip}|${up}|${tx}|${rx}|${tot}"
+  else
+    USER_SESSIONS[$user]="${cip}|${up}|${tx}|${rx}|${tot}"
+  fi
 done
 
-if [[ $total_live -eq 0 ]]; then
+any=0
+# Loop through active SSH accounts from SQLite first for consistent ordering
+while IFS='|' read -r u limit qb used exp; do
+  [[ -z "$u" ]] && continue
+  cnt=${USER_SESS_CNT[$u]:-0}
+  [[ "$cnt" -le 0 ]] && continue
+
+  any=1
+  live_b="${USER_LIVE_BYTES[$u]:-0}"
+  total_used=$(( ${used:-0} + live_b ))
+  usedd=$(human_bytes "$total_used")
+  if [[ "$qb" == "0" || -z "$qb" ]]; then quotad="Unlimited"; else quotad=$(human_bytes "$qb"); fi
+  [[ "$limit" == "0" ]] && limd="Unlimited" || limd="$limit"
+  ipcol="$GREEN"
+  if [[ "$limd" != "Unlimited" && "$cnt" -gt "$limit" ]]; then ipcol="$RED"; fi
+
+  ui_rule
+  ui_kv "Username" "$u" "$CYAN"
+  ui_kv "Login IP" "${cnt} / ${limd} IP" "$ipcol"
+  ui_kv "Bandwidth" "${usedd} / ${quotad}"
+  ui_kv "Expired" "${exp:--}"
+  printf " ${WHITE}%-12s${NC} :\n" "Active IPs"
+  while IFS='|' read -r cip up tx rx tot; do
+    [[ -z "$cip" ]] && continue
+    geo=$(lookup_ip_geo "$cip")
+    asn_isp="${geo%%|*}"
+    loc="${geo#*|}"
+    echo -e "                ${GREEN}- ${cip}${NC} ${YELLOW}[ ${asn_isp} ]${NC}"
+    [[ -n "$loc" && "$loc" != "Unknown Location" ]] && echo -e "                  ${CYAN}${loc}${NC}"
+    s_info=()
+    [[ -n "$up" && "$up" != "-" ]] && s_info+=("Uptime: $up")
+    [[ -n "$tx" && "$tx" != "-" ]] && s_info+=("TX $tx")
+    [[ -n "$rx" && "$rx" != "-" ]] && s_info+=("RX $rx")
+    [[ -n "$tot" && "$tot" != "-" ]] && s_info+=("Total $tot")
+    if [[ ${#s_info[@]} -gt 0 ]]; then
+      echo -e "                  \033[38;5;244m($(IFS=' | '; echo "${s_info[*]}"))${NC}"
+    fi
+  done <<< "${USER_SESSIONS[$u]}"
+  if [[ "$ipcol" == "$RED" ]]; then
+    echo -e "                ${RED}[!] EXCEEDS IP LIMIT${NC}"
+  fi
+done < <(db_query "SELECT username, limit_ip, quota_bytes, used_bytes,
+                          datetime(expired_at,'unixepoch','localtime')
+                   FROM accounts WHERE protocol='ssh' AND status='active'
+                   ORDER BY username;")
+
+# Also handle any active sessions not in DB accounts (e.g. root or detecting)
+for u in "${!USER_SESS_CNT[@]}"; do
+  if ! db_account_exists "ssh" "$u"; then
+    cnt=${USER_SESS_CNT[$u]:-0}
+    [[ "$cnt" -le 0 ]] && continue
+    any=1
+    live_b="${USER_LIVE_BYTES[$u]:-0}"
+    usedd=$(human_bytes "$live_b")
+
+    ui_rule
+    ui_kv "Username" "$u" "$YELLOW"
+    ui_kv "Login IP" "${cnt} / Unlimited IP" "$GREEN"
+    ui_kv "Bandwidth" "${usedd} / Unlimited"
+    ui_kv "Expired" "System User"
+    printf " ${WHITE}%-12s${NC} :\n" "Active IPs"
+    while IFS='|' read -r cip up tx rx tot; do
+      [[ -z "$cip" ]] && continue
+      geo=$(lookup_ip_geo "$cip")
+      asn_isp="${geo%%|*}"
+      loc="${geo#*|}"
+      echo -e "                ${GREEN}- ${cip}${NC} ${YELLOW}[ ${asn_isp} ]${NC}"
+      [[ -n "$loc" && "$loc" != "Unknown Location" ]] && echo -e "                  ${CYAN}${loc}${NC}"
+      s_info=()
+      [[ -n "$up" && "$up" != "-" ]] && s_info+=("Uptime: $up")
+      [[ -n "$tx" && "$tx" != "-" ]] && s_info+=("TX $tx")
+      [[ -n "$rx" && "$rx" != "-" ]] && s_info+=("RX $rx")
+      [[ -n "$tot" && "$tot" != "-" ]] && s_info+=("Total $tot")
+      if [[ ${#s_info[@]} -gt 0 ]]; then
+        echo -e "                  \033[38;5;244m($(IFS=' | '; echo "${s_info[*]}"))${NC}"
+      fi
+    done <<< "${USER_SESSIONS[$u]}"
+  fi
+done
+
+if [[ $any -eq 0 ]]; then
   ui_rule
   echo -e " ${YELLOW}No active SSH sessions.${NC}"
 fi
 
-ui_rule
-echo -e " ${WHITE}PER-USER SESSIONS (vs IP limit)${NC}"
-ui_rule
-shown_users=0
-while IFS='|' read -r u limit; do
-  [[ -z "$u" ]] && continue
-  cnt=${USER_SESS[$u]:-0}
-  # Only show usernames that actually have an active connection.
-  [[ "$cnt" -le 0 ]] && continue
-  col="$GREEN"
-  if [[ "$limit" == "0" ]]; then
-    limd="Unlimited"
-  else
-    limd="$limit"
-    [[ "$cnt" -gt "$limit" ]] && col="$RED"
-  fi
-  printf " ${WHITE}%-14s${NC} ${col}%s / %s${NC}\n" "$u" "$cnt" "$limd"
-  shown_users=$((shown_users+1))
-done < <(db_query "SELECT username, limit_ip FROM accounts WHERE protocol='ssh' AND status='active' ORDER BY username;")
-if [[ $shown_users -eq 0 ]]; then
-  echo -e " ${YELLOW}No users with active connections.${NC}"
-fi
 ui_rule
 echo -e " Total live sessions : ${GREEN}${total_live}${NC}"
 ui_foot

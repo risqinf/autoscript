@@ -85,6 +85,9 @@ export CYAN='\033[0;36m'
 export WHITE='\033[1;37m'
 export BICyan='\033[1;96m'
 export BIWhite='\033[1;97m'
+export ORANGE='\033[38;5;208m'
+export PINK='\033[38;5;205m'
+export PILL_TITLE='\033[30;107m'
 
 # --- Adaptive width (tidy on small phone terminals: Termux/PuTTY) ---
 # Detects the real terminal width and clamps it to a readable range so boxes
@@ -100,74 +103,116 @@ ui_width() {
 # Repeat a character N times (portable, no seq/printf-pattern surprises).
 ui_rep() { local ch="$1" n="$2" out=""; while (( n > 0 )); do out+="$ch"; ((n--)); done; printf '%s' "$out"; }
 
-# Modern, widely-supported light rule (U+2500). Renders cleanly on phone
-# terminals (Termux), PuTTY, and desktop terminals alike.
-line() { echo -e "${CYAN}$(ui_rep '─' "$(ui_width)")${NC}"; }
-ok()    { echo -e "${GREEN}[OK]${NC} $1"; }
-info()  { echo -e "${BLUE}[INFO]${NC} $1"; }
-warn()  { echo -e "${YELLOW}[WARN]${NC} $1"; }
-err()   { echo -e "${RED}[ERROR]${NC} $1"; }
+# SkyNode-inspired double-line rule (═)
+line()    { echo -e "${CYAN}$(ui_rep '═' "$(ui_width)")${NC}"; }
+ok()      { echo -e "${GREEN}[OK]${NC} $1"; }
+info()    { echo -e "${BLUE}[INFO]${NC} $1"; }
+warn()    { echo -e "${YELLOW}[WARN]${NC} $1"; }
+err()     { echo -e "${RED}[ERROR]${NC} $1"; }
 
-# --- Consistent UI primitives (used by every menu/script) ---
-# A single modern horizontal rule (the one separator style used everywhere).
-ui_rule() { echo -e "${CYAN}$(ui_rep '─' "$(ui_width)")${NC}"; }
-# A heavier rule used to frame headers (top/bottom of a panel).
-ui_edge() { echo -e "${BICyan}$(ui_rep '━' "$(ui_width)")${NC}"; }
-# Centered title framed by heavy rules (clean, width-adaptive, no side bars so
-# it never breaks on narrow phone terminals). Arg: title text.
+# --- Consistent UI primitives (SkyNode-styled, high-contrast pills) ---
+ui_rule() { echo -e "${CYAN}$(ui_rep '═' "$(ui_width)")${NC}"; }
+ui_edge() { echo -e "${ORANGE}$(ui_rep '═' "$(ui_width)")${NC}"; }
+
+# Centered title with SkyNode pill badge style
 ui_header() {
   local t="$1" w; w=$(ui_width)
-  local deco="• ${t} •"
+  local deco="[ ${t} ]"
   (( ${#deco} > w )) && deco="${t}"
   (( ${#deco} > w )) && deco="${deco:0:w}"
   local pad=$(( (w - ${#deco}) / 2 )); (( pad < 0 )) && pad=0
   ui_edge
-  printf "${BICyan}%*s%s${NC}\n" "$pad" "" "$deco"
+  printf "%*s${PILL_TITLE}%s${NC}\n" "$pad" "" "$deco"
   ui_edge
 }
 ui_sep()  { ui_rule; }
 ui_foot() { ui_edge; }
-# Centered title line only (no rules around it). Arg: title.
 ui_center() {
   local t="$1" w; w=$(ui_width)
   (( ${#t} > w )) && t="${t:0:w}"
   local pad=$(( (w - ${#t}) / 2 )); (( pad < 0 )) && pad=0
   printf "${WHITE}%*s%s${NC}\n" "$pad" "" "$t"
 }
-# Section label (left aligned, bright). Arg: text.
-ui_label() { echo -e " ${BIWhite}» $1${NC}"; }
-# A numbered menu option row. Args: number text.
-ui_opt() { printf "  ${BICyan}%2s${NC} ${WHITE}│${NC} %s\n" "$1" "$2"; }
+# Section label with SkyNode pill format
+ui_label() { echo -e "  ${PILL_TITLE}[ $1 ]${NC}"; }
+# A numbered menu option row with SkyNode bullet formatting (•1)
+ui_opt() { printf "  ${PINK}(•%2s)${NC} ${WHITE}│${NC} %s\n" "$1" "$2"; }
 # Standard "back to menu" prompt used everywhere.
 ui_back() { echo ""; read -n 1 -s -r -p " Press any key to return..."; }
 # Aligned "label : value" row used by all detail/output panels.
-# Args: label value [value-color]
 ui_kv() {
   local label="$1" value="$2" vcol="${3:-$GREEN}"
   printf " ${WHITE}%-12s${NC} ${CYAN}:${NC} ${vcol}%s${NC}\n" "$label" "$value"
 }
 # Service status row: name left, colored bracketed badge after a colon.
-# Args: name badge(pre-colored string)
 ui_status() { printf " ${WHITE}%-12s${NC} ${CYAN}:${NC} %b\n" "$1" "$2"; }
 
-# --- Service status helpers (used by menu + status checker) ---
-# Returns 0 if the unit is active.
+# --- Service status helpers (SkyNode colored bracket badges) ---
 svc_active() { systemctl is-active --quiet "$1" 2>/dev/null; }
-# Bracketed colored ON/OFF badge for a single unit. Arg: unit name.
 svc_badge() {
-  if svc_active "$1"; then echo -e "${GREEN}[ ON ]${NC}"; else echo -e "${RED}[ OFF ]${NC}"; fi
+  if svc_active "$1"; then
+    echo -e "${PINK}[${GREEN} ON ${PINK}]${NC}"
+  else
+    echo -e "${PINK}[${RED} OFF ${PINK}]${NC}"
+  fi
 }
-# Combined SSH tunnel badge (dropbear + ssh-ws). 3 states:
-#   both up   -> green [ ON ]
-#   one up    -> yellow [ WARN ]
-#   none up   -> red [ OFF ]
 ssh_stack_badge() {
   local a=0 b=0
   svc_active dropbear && a=1
   svc_active ssh-ws  && b=1
-  if   (( a==1 && b==1 )); then echo -e "${GREEN}[ ON ]${NC}"
-  elif (( a==1 || b==1 )); then echo -e "${YELLOW}[ WARN ]${NC}"
-  else echo -e "${RED}[ OFF ]${NC}"
+  if   (( a==1 && b==1 )); then echo -e "${PINK}[${GREEN} ON ${PINK}]${NC}"
+  elif (( a==1 || b==1 )); then echo -e "${PINK}[${YELLOW} WARN ${PINK}]${NC}"
+  else echo -e "${PINK}[${RED} OFF ${PINK}]${NC}"
+  fi
+}
+
+# Exact htop-aligned RAM calculation: (MemTotal - MemAvailable)
+get_ram_info() {
+  local total_kb avail_kb used_kb total_mb used_mb pct
+  total_kb=$(awk '/MemTotal/ {print $2}' /proc/meminfo 2>/dev/null)
+  avail_kb=$(awk '/MemAvailable/ {print $2}' /proc/meminfo 2>/dev/null)
+  if [[ -z "$total_kb" || -z "$avail_kb" || "$total_kb" -eq 0 ]]; then
+    free -h 2>/dev/null | grep "Mem:" | awk '{print $3 "/" $2}' || echo "N/A"
+    return
+  fi
+  used_kb=$(( total_kb - avail_kb ))
+  total_mb=$(( total_kb / 1024 ))
+  used_mb=$(( used_kb / 1024 ))
+  pct=$(( (used_kb * 100) / total_kb ))
+  if (( total_mb >= 1024 )); then
+    local u_gb t_gb
+    u_gb=$(awk "BEGIN {printf \"%.1f\", $used_mb/1024}")
+    t_gb=$(awk "BEGIN {printf \"%.1f\", $total_mb/1024}")
+    echo "${u_gb} GB / ${t_gb} GB (${pct}%)"
+  else
+    echo "${used_mb} MB / ${total_mb} MB (${pct}%)"
+  fi
+}
+
+# Accurate instantaneous CPU usage percentage (delta of /proc/stat)
+get_cpu_usage() {
+  local u1 n1 s1 i1 w1 x1 y1 z1
+  local u2 n2 s2 i2 w2 x2 y2 z2
+  if [[ ! -r /proc/stat ]]; then
+    top -bn1 2>/dev/null | grep "Cpu(s)" | awk '{print $2"% user"}' || echo "N/A"
+    return
+  fi
+  read -r _ u1 n1 s1 i1 w1 x1 y1 z1 < /proc/stat
+  sleep 0.08
+  read -r _ u2 n2 s2 i2 w2 x2 y2 z2 < /proc/stat
+  local total1=$((u1 + n1 + s1 + i1 + w1 + x1 + y1 + z1))
+  local total2=$((u2 + n2 + s2 + i2 + w2 + x2 + y2 + z2))
+  local idle1=$((i1 + w1))
+  local idle2=$((i2 + w2))
+  local diff_total=$((total2 - total1))
+  local diff_idle=$((idle2 - idle1))
+  if (( diff_total > 0 )); then
+    local used=$(( (100 * (diff_total - diff_idle)) / diff_total ))
+    (( used < 0 )) && used=0
+    (( used > 100 )) && used=100
+    echo "${used}%"
+  else
+    echo "0%"
   fi
 }
 
@@ -295,4 +340,118 @@ tg_send() {
 # --- Require root ---
 require_root() {
   if [[ $EUID -ne 0 ]]; then err "This must be run as root."; exit 1; fi
+}
+
+# --- IP Geolocation & ASN Lookup (On-The-Fly / RAM Cached) ---
+# Args: <ip>
+# Returns: <asn_or_isp>|<location> (e.g. "AS4818 DiGi Telecommunications Sdn. Bhd.|Kuching, Sarawak, MY")
+declare -gA __LIVE_IP_CACHE=()
+
+lookup_ip_geo() {
+  local ip="$1"
+  [[ -z "$ip" ]] && { echo "Unknown|Unknown"; return; }
+
+  # Strip port or CIDR if present
+  ip="${ip%%:*}"
+  ip="${ip%%/*}"
+
+  # Handle loopback and private networks
+  if [[ "$ip" =~ ^127\. || "$ip" == "::1" || "$ip" == "localhost" ]]; then
+    echo "Localhost|Local System"
+    return
+  fi
+  if [[ "$ip" =~ ^10\. || "$ip" =~ ^192\.168\. || "$ip" =~ ^172\.(1[6-9]|2[0-9]|3[0-1])\. ]]; then
+    echo "Private Network|LAN"
+    return
+  fi
+  if [[ ! "$ip" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ && ! "$ip" =~ : ]]; then
+    echo "Direct/Unknown|Unknown"
+    return
+  fi
+
+  # Check in-memory process cache (avoid duplicate requests in the same screen)
+  if [[ -n "${__LIVE_IP_CACHE[$ip]}" ]]; then
+    echo "${__LIVE_IP_CACHE[$ip]}"
+    return
+  fi
+
+  # Query Primary API: ip-api.com
+  local res status as_name isp_name city region country loc_parts=()
+  if command -v curl >/dev/null 2>&1; then
+    res=$(curl -s --connect-timeout 2 --max-time 3 "http://ip-api.com/json/${ip}?fields=status,message,countryCode,regionName,city,as,isp" 2>/dev/null)
+    if command -v jq >/dev/null 2>&1; then
+      status=$(echo "$res" | jq -r '.status // empty' 2>/dev/null)
+      if [[ "$status" == "success" ]]; then
+        as_name=$(echo "$res" | jq -r '.as // empty' 2>/dev/null)
+        isp_name=$(echo "$res" | jq -r '.isp // empty' 2>/dev/null)
+        city=$(echo "$res" | jq -r '.city // empty' 2>/dev/null)
+        region=$(echo "$res" | jq -r '.regionName // empty' 2>/dev/null)
+        country=$(echo "$res" | jq -r '.countryCode // empty' 2>/dev/null)
+      fi
+    else
+      status=$(echo "$res" | awk -F'"status": *"' '{split($2,a,"\""); print a[1]}')
+      if [[ "$status" == "success" ]]; then
+        as_name=$(echo "$res" | awk -F'"as": *"' '{split($2,a,"\""); print a[1]}')
+        isp_name=$(echo "$res" | awk -F'"isp": *"' '{split($2,a,"\""); print a[1]}')
+        city=$(echo "$res" | awk -F'"city": *"' '{split($2,a,"\""); print a[1]}')
+        region=$(echo "$res" | awk -F'"regionName": *"' '{split($2,a,"\""); print a[1]}')
+        country=$(echo "$res" | awk -F'"countryCode": *"' '{split($2,a,"\""); print a[1]}')
+      fi
+    fi
+
+    # Fallback API: ipwho.is if primary returned no ASN / failed
+    if [[ -z "$as_name" && -z "$isp_name" ]]; then
+      res=$(curl -s --connect-timeout 2 --max-time 3 "https://ipwho.is/${ip}" 2>/dev/null)
+      if command -v jq >/dev/null 2>&1; then
+        if [[ $(echo "$res" | jq -r '.success // false' 2>/dev/null) == "true" ]]; then
+          local asn org
+          asn=$(echo "$res" | jq -r '.connection.asn // empty' 2>/dev/null)
+          org=$(echo "$res" | jq -r '.connection.org // .connection.isp // empty' 2>/dev/null)
+          [[ -n "$asn" && "$asn" != "null" ]] && as_name="AS${asn} ${org}" || as_name="$org"
+          isp_name=$(echo "$res" | jq -r '.connection.isp // empty' 2>/dev/null)
+          city=$(echo "$res" | jq -r '.city // empty' 2>/dev/null)
+          region=$(echo "$res" | jq -r '.region // empty' 2>/dev/null)
+          country=$(echo "$res" | jq -r '.country_code // empty' 2>/dev/null)
+        fi
+      else
+        local succ asn org
+        succ=$(echo "$res" | awk -F'"success":' '{split($2,a,"[,}]"); print a[1]}' | tr -d ' ')
+        if [[ "$succ" == "true" ]]; then
+          asn=$(echo "$res" | awk -F'"asn":' '{split($2,a,"[,}]"); print a[1]}' | tr -d ' ')
+          org=$(echo "$res" | awk -F'"org": *"' '{split($2,a,"\""); print a[1]}')
+          [[ -z "$org" ]] && org=$(echo "$res" | awk -F'"isp": *"' '{split($2,a,"\""); print a[1]}')
+          [[ -n "$asn" && "$asn" != "null" && "$asn" != "0" ]] && as_name="AS${asn} ${org}" || as_name="$org"
+          isp_name=$(echo "$res" | awk -F'"isp": *"' '{split($2,a,"\""); print a[1]}')
+          city=$(echo "$res" | awk -F'"city": *"' '{split($2,a,"\""); print a[1]}')
+          region=$(echo "$res" | awk -F'"region": *"' '{split($2,a,"\""); print a[1]}')
+          country=$(echo "$res" | awk -F'"country_code": *"' '{split($2,a,"\""); print a[1]}')
+        fi
+      fi
+    fi
+  fi
+
+  # Formulate ASN / ISP
+  local asn_isp="Unknown ISP"
+  if [[ -n "$as_name" && "$as_name" != "null" ]]; then
+    asn_isp="$as_name"
+  elif [[ -n "$isp_name" && "$isp_name" != "null" ]]; then
+    asn_isp="$isp_name"
+  fi
+
+  # Formulate Location (City, Region, Country)
+  local location=""
+  [[ -n "$city" && "$city" != "null" ]] && loc_parts+=("$city")
+  [[ -n "$region" && "$region" != "null" && "$region" != "$city" ]] && loc_parts+=("$region")
+  [[ -n "$country" && "$country" != "null" ]] && loc_parts+=("$country")
+
+  if [[ ${#loc_parts[@]} -gt 0 ]]; then
+    location=$(printf ", %s" "${loc_parts[@]}")
+    location="${location:2}"
+  else
+    location="Unknown Location"
+  fi
+
+  local result="${asn_isp}|${location}"
+  __LIVE_IP_CACHE[$ip]="$result"
+  echo "$result"
 }
