@@ -49,6 +49,10 @@ cp -f "$AS_BOTKEY" "$AS_CHATID" "$work/etc/" 2>/dev/null
 cp -f "$AS_CLOUD_VAULT_URL" "$AS_AUTOBACKUP_TYPE" "$work/etc/" 2>/dev/null
 [[ -d /etc/slowdns ]] && cp -rf /etc/slowdns "$work/etc/" 2>/dev/null
 [[ -d /etc/noobzvpns ]] && cp -rf /etc/noobzvpns "$work/etc/" 2>/dev/null
+if [[ -d /etc/api ]]; then
+  [[ -f /etc/api/api.db ]] && sqlite3 /etc/api/api.db "PRAGMA wal_checkpoint(TRUNCATE);" >/dev/null 2>&1 || true
+  cp -rf /etc/api "$work/etc/" 2>/dev/null
+fi
 cp -f /etc/passwd /etc/shadow /etc/group /etc/gshadow "$work/" 2>/dev/null
 
 which zip >/dev/null 2>&1 || dnf install zip -y >/dev/null 2>&1

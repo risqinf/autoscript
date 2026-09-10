@@ -88,7 +88,7 @@ for cmd in menu menu-ssh menu-vless menu-vmess menu-trojan menu-host menu-backup
     trial-ssh trial-vless trial-vmess trial-trojan trial-noobz \
     delete-ssh delete-vless delete-vmess delete-trojan delete-noobz \
     renew-ssh renew-vless renew-vmess renew-trojan renew-noobz \
-    recovery-ssh recovery-vless recovery-vmess recovery-trojan \
+    recovery-ssh recovery-vless recovery-vmess recovery-trojan recovery-noobz \
     cek-ssh cek-vless cek-vmess cek-trojan cek-user cek-noobz \
     config-ssh config-vless config-vmess config-trojan config-noobz \
     list-ssh list-vless list-vmess list-trojan list-noobz \
@@ -96,9 +96,9 @@ for cmd in menu menu-ssh menu-vless menu-vmess menu-trojan menu-host menu-backup
     loop-ip-vless loop-ip-vmess loop-ip-trojan \
     loop-quota-vless loop-quota-vmess loop-quota-trojan \
     quota-vless quota-vmess quota-trojan \
-    xp-ssh xp-vless xp-vmess xp-trojan \
+    xp-ssh xp-vless xp-vmess xp-trojan xp-noobz \
     install-api uninstall-api slowdns \
-    backup restore fixlog versi-xray stream-check change-domain change-dns change-timezone change-banner status set-telegram uninstall; do
+    backup restore fixlog limit-speed bw-monitor versi-xray stream-check change-domain change-dns change-timezone change-banner status set-telegram uninstall; do
     rm -f "/usr/local/sbin/$cmd"
 done
 

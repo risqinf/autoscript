@@ -22,12 +22,14 @@ secs=$(duration_to_seconds "$duration")
 exp_epoch=$(( $(date +%s) + secs ))
 exp_system=$(date -d "@${exp_epoch}" +%Y-%m-%d)
 
-if db_account_exists "noobz" "$user"; then err_json 409 "Username collision, retry"; fi
+days=$(( (secs + 86399) / 86400 ))
+(( days < 1 )) && days=1
 
-noobzvpns user add "$user" "$pass" >/dev/null 2>&1 || true
-noobzvpns user expire "$user" "$exp_system" >/dev/null 2>&1 || true
-if [[ "$limit_ip" -gt 0 ]]; then
-  noobzvpns user devices "$user" "$limit_ip" >/dev/null 2>&1 || true
+if command -v noobzvpns &>/dev/null; then
+  local_cmd=("noobzvpns" "add" "$user" "-p" "$pass" "-e" "$days")
+  [[ "$limit_ip" -gt 0 ]] && local_cmd+=("-d" "$limit_ip")
+  local_cmd+=("-b" "10")
+  "${local_cmd[@]}" >/dev/null 2>&1 || true
 fi
 
 db_insert_account "noobz" "$user" "$pass" 0 "$limit_ip" "$exp_epoch"

@@ -39,6 +39,10 @@ while IFS='|' read -r proto secret iplim qb exp status; do
     ssh_print_cli "$user" "$secret" "$iplim" "$exp" "$quota" "SSH ACCOUNT ($status)"
     continue
   fi
+  if [[ "$proto" == "noobz" ]]; then
+    noobz_print_cli "$user" "$secret" "$iplim" "$exp" "$quota" "NOOBZVPN ACCOUNT ($status)"
+    continue
+  fi
   ui_header "${proto^^} ACCOUNT (${status})"
   ui_kv "Remarks"   "$user" "$CYAN"
   ui_kv "Host / IP" "$domain"

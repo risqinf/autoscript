@@ -11,4 +11,5 @@ xp-ssh
 xp-vless
 xp-vmess
 xp-trojan
+xp-noobz
 exit 0

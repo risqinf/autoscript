@@ -1,6 +1,6 @@
 # Autoscript VPN — API Reference Manual
 
-> **Version:** 5.0.0 (Production Release)  
+> **Version:** 5.3.0 (Production Release)  
 > **Server Engine:** High-performance Go RESTful Daemon (`api-server`) powered by FastHTTP & SQLite (Zero CGO)  
 > **Repository:** [https://github.com/risqinf/autoscript](https://github.com/risqinf/autoscript)
 
@@ -295,11 +295,38 @@ curl -s -X DELETE https://example.com/api/accounts/ssh/john_doe \
 ### 4.7. Recover Account
 `POST /api/accounts/{protocol}/{username}/recovery`
 
-Restores a soft-deleted or suspended account back into active service, re-injects credentials into the daemon routing table, and marks status as `active`.
+Restores a soft-deleted, expired, or suspended account back into active service, re-injects credentials into the daemon routing table, and marks status as `active`.
 
+#### Protocol-Specific Recovery Actions:
+- **`ssh`**: Recreates the Linux system user (`useradd -M -s /bin/false`), resets the user password (`chpasswd`), sets account expiry (`chage -E`), restarts/reloads Dropbear, and updates the SQLite status to `active`.
+- **`noobz`**: Unblocks the account in `noobzvpns` via `noobzvpns unblock <user>` (or re-provisions with original credentials if absent) and updates SQLite status to `active`.
+- **`vless` / `vmess` / `trojan`**: Re-injects user UUID/password into running Xray inbound configurations and sets SQLite status to `active`.
+
+#### Example: Recover SSH Account
+```bash
+curl -s -X POST https://example.com/api/accounts/ssh/john_doe/recovery \
+  -H "Authorization: Bearer YOUR_API_TOKEN"
+```
+
+#### Example: Recover NoobzVPN Account
 ```bash
 curl -s -X POST https://example.com/api/accounts/noobz/vip_noobz/recovery \
   -H "Authorization: Bearer YOUR_API_TOKEN"
+```
+
+#### Example Response (`200 OK`)
+```json
+{
+  "success": true,
+  "code": 200,
+  "message": "Account recovered successfully",
+  "data": {
+    "username": "vip_noobz",
+    "protocol": "noobz",
+    "status": "active",
+    "expired_at": "2026-10-10T12:00:00Z"
+  }
+}
 ```
 
 ---
@@ -531,12 +558,37 @@ Used by uptime probes, load balancers, and external health checks. Does not requ
 
 ## 8. Shell API Compatibility Mode (`scripts/api/`)
 
-In addition to the high-performance Go RESTful daemon, Autoscript provides a standard pipe-based CLI API suite located in `/usr/local/sbin/api/`. These scripts accept JSON strings via standard input (`stdin`) and output JSON to standard output (`stdout`), allowing legacy shell integrations and bot engines to operate interchangeably:
+In addition to the high-performance Go RESTful daemon, Autoscript provides a standard pipe-based CLI API suite located in `/usr/local/sbin/api/`. These scripts accept JSON strings via standard input (`stdin`) and output JSON to standard output (`stdout`), allowing legacy shell integrations and bot engines to operate interchangeably.
 
+### 8.1. Available Shell Handlers Matrix (25 Scripts)
+
+| Protocol | Account Creation | Trial Generation | Account Renewal | Soft/Hard Deletion | Account Recovery |
+|---|---|---|---|---|---|
+| **SSH** | `add-ssh` | `trial-ssh` | `renew-ssh` | `delete-ssh` | `recovery-ssh` |
+| **VLESS** | `add-vless` | `trial-vless` | `renew-vless` | `delete-vless` | `recovery-vless` |
+| **VMESS** | `add-vmess` | `trial-vmess` | `renew-vmess` | `delete-vmess` | `recovery-vmess` |
+| **Trojan** | `add-trojan` | `trial-trojan` | `renew-trojan` | `delete-trojan` | `recovery-trojan` |
+| **NoobzVPN** | `add-noobz` | `trial-noobz` | `renew-noobz` | `delete-noobz` | `recovery-noobz` |
+
+### 8.2. Shell API Usage Examples
+
+#### Creating a NoobzVPN Account
 ```bash
-# Example: Creating a Noobz account via pipe CLI
 echo '{"username":"noobz_user","password":"mypassword","expired":30,"limit_ip":2,"quota":20}' | /usr/local/sbin/api/add-noobz
-
-# Example: Checking response
-# Output: {"status":"true","code":201,"message":"NoobzVPN account created successfully","data":{...}}
 ```
+
+#### Creating a Trial Account
+```bash
+echo '{"limit_ip":1,"quota":5}' | /usr/local/sbin/api/trial-noobz
+```
+
+#### Recovering an Account (SSH or NoobzVPN)
+```bash
+# Recover SSH account (re-creates Linux user and updates DB)
+echo '{"username":"john_doe"}' | /usr/local/sbin/api/recovery-ssh
+
+# Recover NoobzVPN account (unblocks daemon and updates DB)
+echo '{"username":"noobz_user"}' | /usr/local/sbin/api/recovery-noobz
+```
+
+All shell API handlers emit standardized JSON responses with `"status": "true"|"false"`, `"code": 200|201|400|404|500`, and structured payload objects.

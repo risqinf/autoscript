@@ -16,14 +16,15 @@ clear
 line
 echo -e "${WHITE}  AUTO BULK ACCOUNT GENERATOR${NC}"
 line
-echo "1. SSH    2. VLESS    3. VMESS    4. TROJAN"
+echo "1. SSH    2. VLESS    3. VMESS    4. TROJAN    5. NOOBZ"
 line
-read -rp "Select Protocol (1-4): " sel
+read -rp "Select Protocol (1-5): " sel
 case "$sel" in
   1) proto="ssh" ;;
   2) proto="vless" ;;
   3) proto="vmess" ;;
   4) proto="trojan" ;;
+  5) proto="noobz" ;;
   *) err "Invalid selection."; exit 1 ;;
 esac
 
@@ -34,8 +35,12 @@ valid_number "$count" || { err "Count must be a number."; exit 1; }
 (( count >= 1 )) || { err "Count must be >= 1."; exit 1; }
 read -rp "Expired (days): " days
 valid_days "$days" || { err "Days must be 1-3650."; exit 1; }
-read -rp "Limit IP: " limit_ip
-valid_number "$limit_ip" || { err "Limit IP must be a number."; exit 1; }
+if [[ "$proto" == "noobz" ]]; then
+  read -rp "Limit Device (0=unlimited): " limit_ip
+else
+  read -rp "Limit IP (0=unlimited): " limit_ip
+fi
+valid_number "$limit_ip" || { err "Limit must be a number."; exit 1; }
 
 quota=0
 if [[ "$proto" != "ssh" ]]; then
@@ -58,6 +63,15 @@ for (( i=1; i<=count; i++ )); do
       success=$((success+1)); echo "SSH  $user / $pass"
       # One Telegram message per account.
       if tg_send "$(ssh_tg_text "$user" "$pass" "$ip_disp" "$exp_disp" "SSH ACCOUNT (BULK)")"; then
+        sent=$((sent+1))
+      fi
+    fi
+  elif [[ "$proto" == "noobz" ]]; then
+    pass=$(gen_pass 10)
+    if acc_noobz_create "$user" "$pass" "$limit_ip" "$days" "$quota" >/dev/null 2>&1; then
+      success=$((success+1)); echo "NOOBZ  $user / $pass"
+      # One Telegram message per account.
+      if tg_send "$(noobz_tg_text "$user" "$pass" "$ip_disp" "$exp_disp" "$quota_disp" "NOOBZVPN ACCOUNT (BULK)")"; then
         sent=$((sent+1))
       fi
     fi

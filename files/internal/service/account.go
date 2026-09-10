@@ -314,29 +314,27 @@ func (s *accountService) createXrayAccount(ctx context.Context, protocol string,
 // createNoobzAccount creates a NoobzVPN user and database record.
 func (s *accountService) createNoobzAccount(ctx context.Context, req *model.CreateAccountRequest) (*model.Account, error) {
 	expiry := time.Now().AddDate(0, 0, req.Days)
-	expiryStr := expiry.Format("2006-01-02")
-
-	// Call noobzvpns user add <username> <password>
-	cmd := exec.CommandContext(ctx, "noobzvpns", "user", "add", req.Username, req.Password)
-	if output, err := cmd.CombinedOutput(); err != nil {
-		s.logger.Warn().Err(err).Str("output", string(output)).Msg("noobzvpns user add")
-	}
-
-	if req.Days > 0 {
-		cmdExpire := exec.CommandContext(ctx, "noobzvpns", "user", "expire", req.Username, expiryStr)
-		_ = cmdExpire.Run()
-	}
 
 	var quotaBytes int64
 	if req.Quota > 0 {
 		quotaBytes = int64(req.Quota) * 1073741824
-		cmdBandwidth := exec.CommandContext(ctx, "noobzvpns", "user", "bandwidth", req.Username, fmt.Sprintf("%d", quotaBytes))
-		_ = cmdBandwidth.Run()
 	}
 
+	// Call noobzvpns add USERNAME -p PASSWORD [-e DAYS] [-b BANDWIDTH_GB] [-d DEVICES]
+	args := []string{"add", req.Username, "-p", req.Password}
+	if req.Days > 0 {
+		args = append(args, "-e", fmt.Sprintf("%d", req.Days))
+	}
+	if req.Quota > 0 {
+		args = append(args, "-b", fmt.Sprintf("%d", req.Quota))
+	}
 	if req.LimitIP > 0 {
-		cmdDevices := exec.CommandContext(ctx, "noobzvpns", "user", "devices", req.Username, fmt.Sprintf("%d", req.LimitIP))
-		_ = cmdDevices.Run()
+		args = append(args, "-d", fmt.Sprintf("%d", req.LimitIP))
+	}
+
+	cmd := exec.CommandContext(ctx, "noobzvpns", args...)
+	if output, err := cmd.CombinedOutput(); err != nil {
+		s.logger.Warn().Err(err).Str("output", string(output)).Msg("noobzvpns add")
 	}
 
 	account := &model.Account{
@@ -350,7 +348,7 @@ func (s *accountService) createNoobzAccount(ctx context.Context, req *model.Crea
 	}
 
 	if err := s.repo.Create(ctx, account); err != nil {
-		_ = exec.CommandContext(ctx, "noobzvpns", "user", "delete", req.Username).Run()
+		_ = exec.CommandContext(ctx, "noobzvpns", "remove", req.Username).Run()
 		return nil, fmt.Errorf("create db record: %w", err)
 	}
 
@@ -387,9 +385,9 @@ func (s *accountService) DeleteAccount(ctx context.Context, protocol, username s
 			s.logger.Warn().Err(err).Str("output", string(output)).Msg("failed to delete system user")
 		}
 	} else if protocol == "noobz" {
-		cmd := exec.CommandContext(ctx, "noobzvpns", "user", "delete", username)
+		cmd := exec.CommandContext(ctx, "noobzvpns", "remove", username)
 		if output, err := cmd.CombinedOutput(); err != nil {
-			s.logger.Warn().Err(err).Str("output", string(output)).Msg("failed to delete noobz user")
+			s.logger.Warn().Err(err).Str("output", string(output)).Msg("failed to remove noobz user")
 		}
 	}
 
@@ -427,9 +425,9 @@ func (s *accountService) RenewAccount(ctx context.Context, protocol, username st
 			s.logger.Warn().Err(err).Str("output", string(output)).Msg("failed to update system user expiry")
 		}
 	} else if protocol == "noobz" {
-		expiryStr := account.ExpiredAt.Format("2006-01-02")
-		cmd := exec.CommandContext(ctx, "noobzvpns", "user", "expire", username, expiryStr)
+		cmd := exec.CommandContext(ctx, "noobzvpns", "edit", username, "-e", fmt.Sprintf("%d", days))
 		if output, err := cmd.CombinedOutput(); err != nil {
+			_ = exec.CommandContext(ctx, "noobzvpns", "renew", username).Run()
 			s.logger.Warn().Err(err).Str("output", string(output)).Msg("failed to update noobz expiry")
 		}
 	}
@@ -470,15 +468,65 @@ func (s *accountService) RecoverAccount(ctx context.Context, protocol, username 
 		if err := s.addXrayClient(ctx, protocol, username, account.Secret); err != nil {
 			return fmt.Errorf("re-add xray client: %w", err)
 		}
-	} else if protocol == "noobz" {
-		_ = exec.CommandContext(ctx, "noobzvpns", "user", "add", username, account.Secret).Run()
-		expiryStr := account.ExpiredAt.Format("2006-01-02")
-		_ = exec.CommandContext(ctx, "noobzvpns", "user", "expire", username, expiryStr).Run()
-		if account.LimitIP > 0 {
-			_ = exec.CommandContext(ctx, "noobzvpns", "user", "devices", username, fmt.Sprintf("%d", account.LimitIP)).Run()
+	} else if protocol == "ssh" {
+		// Recreate linux user if missing from system
+		checkUser := exec.CommandContext(ctx, "id", username)
+		if err := checkUser.Run(); err != nil {
+			nologin := "/usr/sbin/nologin"
+			if _, err := os.Stat(nologin); err != nil {
+				nologin = "/bin/false"
+			}
+			expiryStr := account.ExpiredAt.Format("2006-01-02")
+			userAddCmd := exec.CommandContext(ctx, "useradd", "-e", expiryStr, "-M", "-N", "-s", nologin, username)
+			if output, err := userAddCmd.CombinedOutput(); err != nil {
+				return fmt.Errorf("re-create system user: %s: %w", string(output), err)
+			}
+			chpasswdCmd := exec.CommandContext(ctx, "chpasswd")
+			chpasswdCmd.Stdin = strings.NewReader(fmt.Sprintf("%s:%s", username, account.Secret))
+			if output, err := chpasswdCmd.CombinedOutput(); err != nil {
+				return fmt.Errorf("set password for recovered user: %s: %w", string(output), err)
+			}
+		} else {
+			expiryStr := account.ExpiredAt.Format("2006-01-02")
+			_ = exec.CommandContext(ctx, "chage", "-E", expiryStr, username).Run()
 		}
-		if account.QuotaBytes > 0 {
-			_ = exec.CommandContext(ctx, "noobzvpns", "user", "bandwidth", username, fmt.Sprintf("%d", account.QuotaBytes)).Run()
+		_ = exec.CommandContext(ctx, "systemctl", "restart", "dropbear").Run()
+	} else if protocol == "noobz" {
+		// Try unblock first (if user is still in noobzvpns database)
+		unblockCmd := exec.CommandContext(ctx, "noobzvpns", "unblock", username)
+		if err := unblockCmd.Run(); err != nil {
+			// If not in daemon, add afresh
+			days := int(time.Until(account.ExpiredAt).Hours() / 24)
+			if days <= 0 {
+				days = 30
+			}
+			args := []string{"add", username, "-p", account.Secret, "-e", fmt.Sprintf("%d", days)}
+			if account.QuotaBytes > 0 {
+				quotaGB := account.QuotaBytes / 1073741824
+				if quotaGB > 0 {
+					args = append(args, "-b", fmt.Sprintf("%d", quotaGB))
+				}
+			}
+			if account.LimitIP > 0 {
+				args = append(args, "-d", fmt.Sprintf("%d", account.LimitIP))
+			}
+			_ = exec.CommandContext(ctx, "noobzvpns", args...).Run()
+		} else {
+			// Unblocked successfully, update expiration/quota/devices
+			days := int(time.Until(account.ExpiredAt).Hours() / 24)
+			if days > 0 {
+				args := []string{"edit", username, "-e", fmt.Sprintf("%d", days)}
+				if account.QuotaBytes > 0 {
+					quotaGB := account.QuotaBytes / 1073741824
+					if quotaGB > 0 {
+						args = append(args, "-b", fmt.Sprintf("%d", quotaGB))
+					}
+				}
+				if account.LimitIP > 0 {
+					args = append(args, "-d", fmt.Sprintf("%d", account.LimitIP))
+				}
+				_ = exec.CommandContext(ctx, "noobzvpns", args...).Run()
+			}
 		}
 	}
 
@@ -521,15 +569,21 @@ func (s *accountService) UpdateAccount(ctx context.Context, protocol, username s
 	}
 
 	if protocol == "noobz" {
+		args := []string{"edit", username}
 		if req.Quota > 0 {
-			_ = exec.CommandContext(ctx, "noobzvpns", "user", "bandwidth", username, fmt.Sprintf("%d", account.QuotaBytes)).Run()
+			args = append(args, "-b", fmt.Sprintf("%d", req.Quota))
 		}
-		if req.LimitIP >= 0 {
-			_ = exec.CommandContext(ctx, "noobzvpns", "user", "devices", username, fmt.Sprintf("%d", account.LimitIP)).Run()
+		if req.LimitIP > 0 {
+			args = append(args, "-d", fmt.Sprintf("%d", req.LimitIP))
 		}
 		if req.Days > 0 {
-			expiryStr := account.ExpiredAt.Format("2006-01-02")
-			_ = exec.CommandContext(ctx, "noobzvpns", "user", "expire", username, expiryStr).Run()
+			args = append(args, "-e", fmt.Sprintf("%d", req.Days))
+		}
+		if req.Password != "" {
+			args = append(args, "-p", req.Password)
+		}
+		if len(args) > 2 {
+			_ = exec.CommandContext(ctx, "noobzvpns", args...).Run()
 		}
 	}
 

@@ -63,6 +63,13 @@ cert() {
     cat /etc/xray/xray.crt /etc/xray/xray.key | tee /etc/haproxy/haproxy.pem > /dev/null
     chmod 600 /etc/xray/xray.key /etc/haproxy/haproxy.pem 2>/dev/null
 
+    # Update NoobzVPN certificate
+    if [[ -d /etc/noobzvpns ]]; then
+        cp -f /etc/xray/xray.crt /etc/noobzvpns/cert.pem
+        cp -f /etc/xray/xray.key /etc/noobzvpns/key.pem
+        chmod 600 /etc/noobzvpns/key.pem /etc/noobzvpns/cert.pem 2>/dev/null || true
+    fi
+
     sleep 2
     clear
     echo -e "[ ${green}INFO${NC} ] Renew cert done... "
@@ -72,6 +79,7 @@ cert() {
     sleep 2
 
     systemctl restart nginx haproxy xray
+    svc_active noobzvpns && systemctl restart noobzvpns 2>/dev/null || true
     sleep 0.5
     clear
     echo -e "[ ${green}INFO${NC} ] All finished... "

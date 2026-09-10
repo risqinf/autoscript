@@ -48,6 +48,13 @@ if [[ -f /etc/letsencrypt/live/$new_domain/fullchain.pem ]]; then
     # Update HAProxy certificate
     cat /etc/xray/xray.crt /etc/xray/xray.key | tee /etc/haproxy/haproxy.pem > /dev/null
     chmod 600 /etc/haproxy/haproxy.pem
+
+    # Update NoobzVPN certificate
+    if [[ -d /etc/noobzvpns ]]; then
+        cp -f /etc/xray/xray.crt /etc/noobzvpns/cert.pem
+        cp -f /etc/xray/xray.key /etc/noobzvpns/key.pem
+        chmod 600 /etc/noobzvpns/key.pem /etc/noobzvpns/cert.pem 2>/dev/null || true
+    fi
     
     echo "SSL Certificate updated successfully."
 else
@@ -56,6 +63,7 @@ fi
 
 echo "Starting services..."
 systemctl start nginx xray haproxy
+svc_active noobzvpns && systemctl restart noobzvpns 2>/dev/null || true
 
 echo "Domain changed to: $new_domain"
 read -n 1 -s -r -p "Press any key to return to menu..."

@@ -1,6 +1,6 @@
 # Autoscript VPN
 
-> Version: **5.2.0** (Release) — see [CHANGELOG.md](CHANGELOG.md).
+> Version: **5.3.0** (Release) — see [CHANGELOG.md](CHANGELOG.md).
 
 AutoScript VPN & Tunneling Management System, engineered for **Rocky Linux 9**.
 
@@ -87,7 +87,7 @@ menu
 
 ### Menu Structure
 ```
-ENTERPRISE VPN MANAGER (v5.0.0)
+ENTERPRISE VPN MANAGER (v5.3.0)
 ├── Accounts Summary: SSH [ # ]  VLESS [ # ]  VMESS [ # ]  TROJAN [ # ]  NOOBZ [ # ]
 ├── Services Status : SSH+WS, SlowDNS, Xray, Nginx, HAProxy, OpenVPN, Squid, NoobzVPN, API
 │
@@ -96,7 +96,7 @@ ENTERPRISE VPN MANAGER (v5.0.0)
 │   ├── 2) VLESS Panel            (WS, HTTPUpgrade, XHTTP, gRPC, quota, limit-ip, recovery)
 │   ├── 3) VMESS Panel            (WS, HTTPUpgrade, XHTTP, gRPC, quota, limit-ip, recovery)
 │   ├── 4) TROJAN Panel           (WS, HTTPUpgrade, XHTTP, gRPC, quota, limit-ip, recovery)
-│   └── 5) NoobzVPN Panel         (add, trial, delete, renew, list, config, recovery, live device-id check)
+│   └── 5) NoobzVPN Panel         (add, trial, delete, renew, list, config, recovery, live device-id check, xp-noobz)
 │
 ├── TOOLS
 │   ├── 6) Auto Bulk Create       (Generate batch accounts)
@@ -143,7 +143,7 @@ Single TLS port (443) and HTTP port (80) multiplexes every protocol through Ngin
 autoscript/
 ├── install.sh              # Unified installer for Rocky Linux 9
 ├── uninstall.sh            # Complete uninstaller and environment purger
-├── VERSION                 # Semantic version file (5.0.0)
+├── VERSION                 # Semantic version file (5.3.0)
 ├── LICENSE                 # Apache License 2.0
 ├── README.md               # Main project manual
 ├── docs/
@@ -156,12 +156,12 @@ autoscript/
     ├── lib/                # Common shell libraries (common, db, xraycfg, account)
     ├── menu/               # Interactive menu scripts (menu, menu-ssh, menu-noobz, ...)
     ├── ssh/                # SSH CLI management commands
-    ├── noobz/              # NoobzVPN CLI commands (add, trial, delete, renew, list, cek, recovery)
+    ├── noobz/              # NoobzVPN CLI commands (add, trial, delete, renew, list, cek, recovery, xp-noobz)
     ├── vless/              # VLESS CLI commands
     ├── vmess/              # VMESS CLI commands
     ├── trojan/             # Trojan CLI commands
     ├── system/             # System utilities (backup, restore, slowdns, status, ...)
-    └── api/                # Pipe-based shell API compatibility handlers
+    └── api/                # Pipe-based shell API compatibility handlers (including recovery-ssh)
 ```
 
 ---

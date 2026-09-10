@@ -140,7 +140,10 @@ acc_noobz_create() {
   fi
 
   if command -v noobzvpns &>/dev/null; then
-    noobzvpns add --password "$pass" "$user" --bandwidth "$quota_gb" --devices "$limit_dev" --expired "$days" >/dev/null 2>&1
+    local cmd=("noobzvpns" "add" "$user" "-p" "$pass" "-e" "$days")
+    (( quota_gb > 0 )) && cmd+=("-b" "$quota_gb")
+    (( limit_dev > 0 )) && cmd+=("-d" "$limit_dev")
+    "${cmd[@]}" >/dev/null 2>&1 || true
   fi
 
   db_insert_account "noobz" "$user" "$pass" "$quota_bytes" "$limit_dev" "$exp_epoch"
@@ -152,10 +155,21 @@ acc_noobz_delete() {
   local user="$1"
   db_account_exists "noobz" "$user" || { err "account not found"; return 4; }
   if command -v noobzvpns &>/dev/null; then
-    noobzvpns remove "$user" >/dev/null 2>&1
+    noobzvpns remove "$user" >/dev/null 2>&1 || true
   fi
   db_set_status "noobz" "$user" "deleted"
   db_audit "delete" "noobz" "$user" ""
+  return 0
+}
+
+acc_noobz_suspend() {
+  local user="$1" reason="${2:-limit}"
+  db_account_exists "noobz" "$user" || return 4
+  if command -v noobzvpns &>/dev/null; then
+    noobzvpns block "$user" >/dev/null 2>&1 || true
+  fi
+  db_set_status "noobz" "$user" "suspended"
+  db_audit "suspend" "noobz" "$user" "$reason"
   return 0
 }
 
@@ -169,10 +183,44 @@ acc_noobz_renew() {
   new=$(( base + days * 86400 ))
   db_set_expired "noobz" "$user" "$new"
   if command -v noobzvpns &>/dev/null; then
-    noobzvpns renew "$user" >/dev/null 2>&1 || true
+    noobzvpns edit "$user" -e "$days" >/dev/null 2>&1 || noobzvpns renew "$user" >/dev/null 2>&1 || true
   fi
   db_audit "renew" "noobz" "$user" "+${days}d"
   echo "$new"
+  return 0
+}
+
+acc_noobz_recover() {
+  local user="$1" days="${2:-30}"
+  db_account_exists "noobz" "$user" || return 4
+  local pass quota_bytes limit_dev exp_epoch quota_gb
+  pass=$(db_get_field "noobz" "$user" "secret")
+  quota_bytes=$(db_get_field "noobz" "$user" "quota_bytes")
+  limit_dev=$(db_get_field "noobz" "$user" "limit_ip")
+  quota_gb=0
+  if [[ -n "$quota_bytes" && "$quota_bytes" -gt 0 ]]; then
+    quota_gb=$(( quota_bytes / 1073741824 ))
+  fi
+  exp_epoch=$(( $(date +%s) + days * 86400 ))
+
+  if command -v noobzvpns &>/dev/null; then
+    # Unblock if currently blocked/suspended; otherwise add user afresh
+    if ! noobzvpns unblock "$user" >/dev/null 2>&1; then
+      local cmd=("noobzvpns" "add" "$user" "-p" "$pass" "-e" "$days")
+      (( quota_gb > 0 )) && cmd+=("-b" "$quota_gb")
+      (( limit_dev > 0 )) && cmd+=("-d" "$limit_dev")
+      "${cmd[@]}" >/dev/null 2>&1 || true
+    else
+      local cmd=("noobzvpns" "edit" "$user" "-e" "$days")
+      (( quota_gb > 0 )) && cmd+=("-b" "$quota_gb")
+      (( limit_dev > 0 )) && cmd+=("-d" "$limit_dev")
+      "${cmd[@]}" >/dev/null 2>&1 || true
+    fi
+  fi
+
+  db_set_expired "noobz" "$user" "$exp_epoch"
+  db_set_status "noobz" "$user" "active"
+  db_audit "recover" "noobz" "$user" "+${days}d"
   return 0
 }
 
@@ -187,13 +235,16 @@ noobz_print_cli() {
   ui_kv "Limit Device" "$dev_disp"
   ui_kv "Expired"      "$exp_disp"
   ui_rule
-  ui_kv "Port HTTP"    "80"
+  ui_kv "Port TCP"     "8585"
+  ui_kv "Port HTTP"    "80, 8080"
   ui_kv "Port TLS"     "443"
   ui_kv "Identifier"   "risqinf"
   ui_kv "Path"         "/noobz"
   ui_rule
   echo -e " ${WHITE}Payload (WS) :${NC}"
   echo -e " ${GREEN}GET /noobz HTTP/1.1[crlf]Host: ${d}[crlf]Upgrade: websocket[crlf][crlf]${NC}"
+  echo -e " ${WHITE}Config String :${NC}"
+  echo -e " ${GREEN}${d}:8585@${user}:${pass}${NC}"
   ui_foot
 }
 
@@ -215,13 +266,17 @@ noobz_tg_text() {
 <b>Limit Device :</b> <code>${edev}</code>
 <b>Expired      :</b> <code>${ex}</code>
 <b>━━━━━━━━━━━━━━━━━━━━━━━━━━━</b>
-<b>Port HTTP    :</b> <code>80</code>
+<b>Port TCP     :</b> <code>8585</code>
+<b>Port HTTP    :</b> <code>80, 8080</code>
 <b>Port TLS     :</b> <code>443</code>
 <b>Identifier   :</b> <code>risqinf</code>
 <b>Path         :</b> <code>/noobz</code>
 <b>━━━━━━━━━━━━━━━━━━━━━━━━━━━</b>
 <b>Payload :</b>
 <code>GET /noobz HTTP/1.1[crlf]Host: ${ed}[crlf]Upgrade: websocket[crlf][crlf]</code>
+<b>━━━━━━━━━━━━━━━━━━━━━━━━━━━</b>
+<b>Config String :</b>
+<code>${ed}:8585@${eu}:${ep}</code>
 <b>━━━━━━━━━━━━━━━━━━━━━━━━━━━</b>
 EOF
 }

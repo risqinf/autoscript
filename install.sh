@@ -3,11 +3,11 @@
 # Project: Autoscript VPN by risqinf
 # Description: AutoScript VPN & Tunneling Management System
 # Developed for Rocky Linux 9
-# Version: 5.2.0
+# Version: 5.3.0
 # License: Apache License 2.0 (see LICENSE file)
 # Repository: https://github.com/risqinf/autoscript
 # ========================================================
-AS_VERSION="5.2.0"
+AS_VERSION="5.3.0"
 # --- Color Definitions ---
 NC='\033[0m'
 RED='\033[0;31m'
@@ -237,7 +237,7 @@ mkdir -p /etc/xray/limit/ip/{ssh,vless,trojan,vmess}
 mkdir -p /etc/xray/limit/quota/{vless,trojan,vmess}
 mkdir -p /etc/xray/limit/database/{ssh,vless,trojan,vmess}
 mkdir -p /etc/xray/usage/quota/{vless,trojan,vmess}
-mkdir -p /etc/xray/recovery/{ssh,vless,trojan,vmess}
+mkdir -p /etc/xray/recovery/{ssh,vless,trojan,vmess,noobz}
 print_success "Directories created."
 
 # Copy Menu
@@ -337,6 +337,8 @@ firewall-cmd --permanent --zone=public --add-port=443/tcp >/dev/null 2>&1 # HTTP
 firewall-cmd --permanent --zone=public --add-port=7300/udp >/dev/null 2>&1
 # OpenVPN
 firewall-cmd --permanent --zone=public --add-port=1194/tcp >/dev/null 2>&1 # OpenVPN TCP
+# NoobzVPN Direct TCP
+firewall-cmd --permanent --zone=public --add-port=8585/tcp >/dev/null 2>&1 # NoobzVPN TCP
 
 firewall-cmd --reload >/dev/null 2>&1
 print_success "Firewall locked down (allowlist only)."
@@ -1350,7 +1352,7 @@ server {
         autoindex on;
     }
 
-    # Future REST API (server not yet shipped).
+    # REST API Daemon (api-server).
     location /api/ {
         proxy_pass http://127.0.0.1:9000;
         proxy_set_header Host \$host;

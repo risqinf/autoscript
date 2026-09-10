@@ -62,6 +62,7 @@ migrate_proto ssh
 migrate_proto vless
 migrate_proto vmess
 migrate_proto trojan
+migrate_proto noobz
 
 # Strip comment markers from config.json so it becomes pure JSON.
 if [[ -f "$AS_CONFIG" ]] && grep -qE '#÷|###|#@' "$AS_CONFIG"; then

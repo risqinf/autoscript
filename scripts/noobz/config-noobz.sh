@@ -26,9 +26,10 @@ pass=$(db_get_field "noobz" "$user" "secret")
 dev=$(db_get_field "noobz" "$user" "limit_ip"); [[ "$dev" == "0" ]] && dev="Unlimited"
 qb=$(db_get_field "noobz" "$user" "quota_bytes")
 [[ "$qb" == "0" || -z "$qb" ]] && quota_disp="Unlimited" || quota_disp="$(( qb / 1073741824 )) GB"
+status=$(db_get_field "noobz" "$user" "status")
 exp=$(db_query "SELECT datetime(expired_at,'unixepoch','localtime') FROM accounts WHERE protocol='noobz' AND username='$(sql_escape "$user")' AND status!='deleted';")
 
 clear
-noobz_print_cli "$user" "$pass" "$dev" "$exp" "$quota_disp" "NOOBZVPN ACCOUNT DETAILS"
+noobz_print_cli "$user" "$pass" "$dev" "$exp" "$quota_disp" "NOOBZVPN ACCOUNT DETAILS (${status^^})"
 ui_back
 menu

@@ -3,6 +3,49 @@
 All notable changes to this project are documented here.
 This project adheres to [Semantic Versioning](https://semver.org/).
 
+## [5.3.0] - 2026-09-10
+
+Comprehensive audit, authentic NoobzVPN core daemon alignment, and missing feature implementation release: **Release 5.3.0**. Resolves all incomplete integrations, brings `noobzvpns` CLI execution into 100% compliance with upstream specifications (`COMMANDLINE.MD`), introduces automated expiration for NoobzVPN (`xp-noobz`), implements SSH recovery API handler (`recovery-ssh`), enhances multi-protocol bulk generation and user checking, bolsters `/etc/api` backup/restore resilience, synchronizes SSL certificates across domains, and updates all documentation.
+
+### Added
+- **NoobzVPN Automated Expiration (`scripts/noobz/xp-noobz.sh`)**:
+  - Built SQLite database-driven auto-expire daemon for NoobzVPN accounts.
+  - Atomically purges expired accounts from the running daemon via authentic `noobzvpns remove "$user"`.
+  - Updates account status in SQLite database to `expired`, writes audit logs, and sends Telegram alert notifications.
+  - Integrated `xp-noobz` into `scripts/system/expire-all.sh` running periodically via `autoexpire.timer`.
+- **SSH Account Recovery Shell API (`scripts/api/recovery-ssh.sh`)**:
+  - Implemented missing shell API handler for SSH account recovery via standard input JSON stream.
+  - Automatically re-provisions Linux OS user (`useradd -M -s /bin/false`), configures password (`chpasswd`), sets account expiration (`chage -E`), reloads Dropbear daemon, updates SQLite database status to `active`, and outputs standard JSON envelope.
+- **Bulk Account Generator (`scripts/system/add-bulk.sh`)**:
+  - Added option `5. NOOBZ` enabling bulk batch creation of NoobzVPN accounts.
+  - Supports configurable quantity, duration, device limits, quota limits (GB), auto-generated passwords, and Telegram batch reporting.
+- **Multi-Protocol User Checker (`scripts/system/cek-user.sh`)**:
+  - Added NoobzVPN account inspection and formatting to `cek-user`.
+- **API Server State Backup & Restore**:
+  - Updated `scripts/system/backup.sh` to archive `/etc/api` (SQLite WAL checkpointed prior to backup).
+  - Updated `scripts/system/restore.sh` to restore `/etc/api` with secure permissions (chmod 700 directory, chmod 600 files) and restart `api-server.service`.
+- **SSL Certificate Synchronization**:
+  - Synchronized domain renewal and certificate updates in `scripts/system/change-domain.sh` and `scripts/menu/menu-host.sh` to automatically copy renewed Xray certificates to `/etc/noobzvpns/{cert.pem,key.pem}` and restart `noobzvpns`.
+
+### Changed
+- **Authentic NoobzVPN CLI Alignment (`scripts/lib/account.sh` & Go REST API)**:
+  - Replaced legacy/erroneous subcommands (`noobzvpns user add/remove/edit`) with authentic syntax verified from `COMMANDLINE.MD`:
+    - Create: `noobzvpns add <user> -p <pass> -e <days> [-b <quota_gb>] [-d <limit_dev>]`
+    - Delete: `noobzvpns remove <user>`
+    - Renew: `noobzvpns edit <user> -e <days>` (with fallback to `noobzvpns renew <user>`)
+    - Suspend / Block: `noobzvpns block <user>`
+    - Recovery / Unblock: `noobzvpns unblock <user>` / re-add
+  - Updated `files/internal/service/account.go` REST API service handlers (`createNoobzAccount`, `DeleteAccount`, `RenewAccount`, `RecoverAccount`, `UpdateAccount`) to execute authentic CLI commands.
+  - Standardized client configuration output string (`${domain}:8585@${user}:${pass}`) and ports (`Port TCP: 8585`, `Port HTTP: 80, 8080`, `Port TLS: 443`).
+- **Database Migration (`scripts/system/db-migrate.sh`)**:
+  - Added `migrate_proto noobz` to database verification and repair routine.
+- **Installer & Uninstaller**:
+  - Added `/etc/xray/recovery/noobz` directory provisioning and `8585/tcp` firewalld rule to `install.sh`.
+  - Added cleanup of `recovery-noobz`, `xp-noobz`, `limit-speed`, and `bw-monitor` to `uninstall.sh`.
+- **Documentation**:
+  - Updated `README.md`, `VERSION`, `install.sh`, and `docs/API.md` to version 5.3.0.
+  - Documented full 25-script 5x5 Shell API matrix in `docs/API.md`.
+
 ## [5.2.0] - 2026-09-10
 
 Maintenance and database integrity release: **Release 5.2.0**. Resolves SQLite database CHECK constraint collision on `protocol` column for NoobzVPN accounts, implements automatic zero-downtime database migration for existing installations, and packages the complete multi-module repository.
@@ -276,6 +319,8 @@ First public beta. Developed for **Rocky Linux 9**.
 - Legacy `.txt` account files and `config.json` comment markers.
 - Ads Block (helium) menu entry.
 
+[5.3.0]: https://github.com/risqinf/autoscript/releases/tag/v5.3.0
+[5.2.0]: https://github.com/risqinf/autoscript/releases/tag/v5.2.0
 [5.0.0]: https://github.com/risqinf/autoscript/releases/tag/v5.0.0
 [4.0.0]: https://github.com/risqinf/autoscript/releases/tag/v4.0.0
 [0.3.0-beta]: https://github.com/risqinf/autoscript/releases/tag/v0.3.0-beta
