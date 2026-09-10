@@ -2165,11 +2165,15 @@ noobz_install_logic() {
   if [[ ! -f /etc/noobzvpns/db_user.json ]]; then
     cat >/etc/noobzvpns/db_user.json <<'EOF'
 {
-  "version": 1,
+  "version": 331,
   "users": {}
 }
 EOF
     chmod 600 /etc/noobzvpns/db_user.json
+  else
+    if grep -q '"version": 1' /etc/noobzvpns/db_user.json 2>/dev/null; then
+      sed -i 's/"version": 1/"version": 331/' /etc/noobzvpns/db_user.json
+    fi
   fi
 
   cat >/etc/noobzvpns/config.toml <<'EOF'
