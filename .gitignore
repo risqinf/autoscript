@@ -22,6 +22,7 @@ backup-*.zip
 *.tar
 *.tar.gz
 *.tar.bz2
+api-tester/*
 main.zip
 
 # ===== OS / editor cruft =====
