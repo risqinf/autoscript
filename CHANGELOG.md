@@ -3,6 +3,17 @@
 All notable changes to this project are documented here.
 This project adheres to [Semantic Versioning](https://semver.org/).
 
+## [5.2.0] - 2026-09-10
+
+Maintenance and database integrity release: **Release 5.2.0**. Resolves SQLite database CHECK constraint collision on `protocol` column for NoobzVPN accounts, implements automatic zero-downtime database migration for existing installations, and packages the complete multi-module repository.
+
+### Fixed
+- **Database (`scripts/lib/db.sh`)**:
+  - Fixed `CHECK constraint failed: protocol IN ('ssh','vless','vmess','trojan') (19)` when creating NoobzVPN accounts (`add-noobz`, `trial-noobz`, and API handlers).
+  - Added `'noobz'` to the allowed protocol CHECK constraint (`protocol IN ('ssh','vless','vmess','trojan','noobz')`).
+  - Added automated schema migration in `db_init()` that safely upgrades existing `/etc/xray/xray.db` tables without data loss or downtime.
+  - Eliminated `date: invalid date '@'` error and missing `Expired` field during NoobzVPN account generation.
+
 ## [5.1.0] - 2026-09-10
 
 Maintenance and stability release: **Release 5.1.0**. Fixes NoobzVPN core daemon schema parsing and service execution, auto-provisions required TLS certificate artifacts, enriches the SlowDNS terminal UI with interactive cues, and fixes API parameter alignment.
