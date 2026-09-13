@@ -1933,15 +1933,6 @@ else
   swap_install_logic
 fi
 
-# Backup Setup (Google Drive via rclone)
-# NOTE: No credentials are shipped. Configure your own remote interactively.
-curl https://rclone.org/install.sh | bash
-if [[ ! -f /root/.config/rclone/rclone.conf ]]; then
-  print_warn "rclone is installed but no remote is configured."
-  print_info "Run 'rclone config' to add your Google Drive remote (name it 'risqinf')."
-fi
-cd /root
-
 # Setup OpenVPN
 WEB_DIR="/var/www/html/risqinf/openvpn"
 EASYRSA_DIR="/etc/openvpn/easy-rsa"
