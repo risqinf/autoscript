@@ -1,6 +1,6 @@
 # Autoscript VPN — API Reference Manual
 
-> **Version:** 5.3.0 (Production Release)  
+> **Version:** 5.4.0 (Production Release)  
 > **Server Engine:** High-performance Go RESTful Daemon (`api-server`) powered by FastHTTP & SQLite (Zero CGO)  
 > **Repository:** [https://github.com/risqinf/autoscript](https://github.com/risqinf/autoscript)
 

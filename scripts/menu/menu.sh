@@ -169,22 +169,6 @@ cpu=$(get_cpu_usage)
 xray_version=$(xray version 2>/dev/null | awk 'NR==1 {print $1, $2}' || echo "Not Installed")
 IPVPS=$(curl -s --max-time 3 ifconfig.me 2>/dev/null || echo "N/A")
 
-menu_rdns_soon() {
-    clear
-    ui_header "RDNS CLIENT (ENCRYPTED TUNNEL)"
-    echo ""
-    ui_kv "Status" "COMING SOON (Private Feature)" "$YELLOW"
-    ui_kv "Type"   "Stealth DNS / TCP Reverse Tunnel" "$CYAN"
-    echo ""
-    echo -e " ${WHITE}RDNS Client is a high-security DNS/TCP stealth${NC}"
-    echo -e " ${WHITE}tunneling daemon designed for extreme bypass.${NC}"
-    echo -e " ${WHITE}This feature is currently under private development${NC}"
-    echo -e " ${WHITE}and will be available as an exclusive add-on.${NC}"
-    echo ""
-    ui_rule
-    read -n 1 -s -r -p " Press any key to return to menu..."
-    menu
-}
 
 # --- MAIN MENU ---
 clear
@@ -209,6 +193,7 @@ ui_status "OpenVPN"   "$resovpn"
 ui_status "Squid"     "$ressquid"
 [[ -x /usr/bin/noobzvpns ]] && ui_status "NoobzVPN" "$resnbz"
 ui_status "API"       "$resapi"
+[[ -f /etc/rdns/client.yaml ]] && ui_status "RDNS Tunnel" "$(svc_badge rdns-client)"
 ui_rule
 ui_label "ACCOUNT PANELS"
 ui_opt 1 "SSH / OpenVPN Panel"
@@ -226,7 +211,7 @@ ui_rule
 ui_label "SERVER"
 ui_opt 10 "System Menu"
 ui_opt 11 "Backup / Restore"
-ui_opt 12 "RDNS Client (Private Tunnel) ${YELLOW}[SOON]${NC}"
+ui_opt 12 "RDNS Client (mTLS Stealth Tunnel)"
 ui_opt x  "Exit"
 ui_rule
 ui_kv "Xray" "$xray_version"
@@ -246,7 +231,7 @@ case $mm in
 9) clear ; run_cc ; menu-api ;;
 10) clear ; run_cc ; menu-system ;;
 11) clear ; run_cc ; menu-backup ;;
-12) clear ; run_cc ; menu_rdns_soon ;;
+12) clear ; run_cc ; menu-rdns ;;
 x|X) clear ; exit 0 ;;
 00) clear ; run_cc ; change-banner ;;
 *) echo "Invalid option, please try again." ; sleep 1 ; menu ;;

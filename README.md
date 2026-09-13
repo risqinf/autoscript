@@ -1,6 +1,6 @@
 # Autoscript VPN
 
-> Version: **5.3.0** (Release) — see [CHANGELOG.md](CHANGELOG.md).
+> Version: **5.4.0** (Release) — see [CHANGELOG.md](CHANGELOG.md).
 
 AutoScript VPN & Tunneling Management System, engineered for **Rocky Linux 9**.
 
@@ -87,9 +87,9 @@ menu
 
 ### Menu Structure
 ```
-ENTERPRISE VPN MANAGER (v5.3.0)
+ENTERPRISE VPN MANAGER (v5.4.0)
 ├── Accounts Summary: SSH [ # ]  VLESS [ # ]  VMESS [ # ]  TROJAN [ # ]  NOOBZ [ # ]
-├── Services Status : SSH+WS, SlowDNS, Xray, Nginx, HAProxy, OpenVPN, Squid, NoobzVPN, API
+├── Services Status : SSH+WS, SlowDNS, Xray, Nginx, HAProxy, OpenVPN, Squid, NoobzVPN, API, RDNS Tunnel
 │
 ├── ACCOUNT PANELS
 │   ├── 1) SSH / OpenVPN Panel    (add, trial, delete, renew, list, config, recovery, cek, slowdns)
@@ -107,7 +107,7 @@ ENTERPRISE VPN MANAGER (v5.3.0)
 └── SERVER
     ├── 10) System Menu           (Domain, SSL, DNS, Speedtest, BBR, Dropbear, Timers)
     ├── 11) Backup / Restore      (Telegram Bot, Manual Zip, Cloud Vault)
-    └── 12) RDNS Client           (Coming soon)
+    └── 12) RDNS Client           (mTLS Stealth Tunnel, Token Pairing, Preset Rules)
 ```
 
 ---
@@ -143,7 +143,7 @@ Single TLS port (443) and HTTP port (80) multiplexes every protocol through Ngin
 autoscript/
 ├── install.sh              # Unified installer for Rocky Linux 9
 ├── uninstall.sh            # Complete uninstaller and environment purger
-├── VERSION                 # Semantic version file (5.3.0)
+├── VERSION                 # Semantic version file (5.4.0)
 ├── LICENSE                 # Apache License 2.0
 ├── README.md               # Main project manual
 ├── docs/

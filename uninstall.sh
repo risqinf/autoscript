@@ -97,10 +97,11 @@ for cmd in menu menu-ssh menu-vless menu-vmess menu-trojan menu-host menu-backup
     loop-quota-vless loop-quota-vmess loop-quota-trojan \
     quota-vless quota-vmess quota-trojan \
     xp-ssh xp-vless xp-vmess xp-trojan xp-noobz \
-    install-api uninstall-api slowdns \
+    install-api uninstall-api slowdns menu-rdns rdns-manager \
     backup restore fixlog limit-speed bw-monitor versi-xray stream-check change-domain change-dns change-timezone change-banner status set-telegram uninstall; do
     rm -f "/usr/local/sbin/$cmd"
 done
+rm -rf /usr/local/sbin/rdns /etc/rdns
 
 # ---------------------------------------------------------------------------
 echo "[5/9] Removing SSH system users created by the script..."

@@ -3,6 +3,37 @@
 All notable changes to this project are documented here.
 This project adheres to [Semantic Versioning](https://semver.org/).
 
+## [5.4.0] - 2026-09-13
+
+Major feature release: **Release 5.4.0**. Introduces universal Reverse DNS (RDNS) mTLS Yamux stealth pairing client, interactive SkyNode-style TUI manager (`menu-rdns`), CLI engine (`rdns-manager`), collision-avoiding rule presets, main menu service monitoring, and installer/uninstaller cleanup (deprecated rclone removal).
+
+### Added
+- **RDNS Client Interactive TUI (`scripts/menu/menu-rdns.sh`)**:
+  - Full SkyNode-styled interactive management interface with author credit to `github: @risqinf`.
+  - Supports 1-click token pairing (`rdns://<base64>`), profile listing, profile deletion, preset rule loading/removing, custom domain rule addition/deletion, dry-run routing testing, and service reloading.
+- **RDNS CLI Engine (`scripts/rdns/rdns-manager.sh`)**:
+  - Robust pairing token decoder and certificate writer (`/etc/rdns/certs/`).
+  - Automatic `client.yaml` profile injector and `rules.json` manager.
+  - Suffix-based collision avoidance: automatically purges conflicting domain rules from other profiles when applying new rules to ensure deterministic longest-suffix routing.
+  - Dry-run domain test matcher using longest-suffix matching algorithm.
+  - Zero-downtime hot reloading via SIGHUP signal to `rdns-client`.
+- **Instant Rule Presets (`scripts/rdns/presets/`)**:
+  - `streaming.json`: Major streaming services (Netflix, Disney+ Hotstar, Viu, Vidio, Prime, HBO Max, Crunchyroll, etc.).
+  - `malaysia.json`: TLD `.my` and Malaysian banking/fintech/telecoms (Maybank, CIMB, TNG, Boost, Astro, Unifi).
+  - `indonesia.json`: TLDs `.id`, `.my.id`, `.co.id` and Indonesian banking/fintech/e-commerce (BCA, Mandiri, BRI, BNI, Dana, GoPay, Shopee, Pajak).
+  - `ipcheck.json`: IP verification and speedtest providers (`ipinfo.io`, `api.ipify.org`, `speedtest.net`, `fast.com`, etc.).
+  - `google.json`: Google core services and YouTube (`youtube.com`, `googlevideo.com`, `gmail.com`, `google.com`).
+- **Main Menu Integration (`scripts/menu/menu.sh`)**:
+  - Added real-time service status badge `RDNS Tunnel : [ ON ]` / `[ OFF ]`.
+  - Added option `(•12) │ RDNS Client (mTLS Stealth Tunnel)` under `SERVER`.
+- **Installer & Uninstaller Integration (`install.sh` & `uninstall.sh`)**:
+  - Auto-installation of RDNS preset libraries into `/usr/local/sbin/rdns/presets/` and `/etc/rdns/presets/`.
+  - Inclusion of `menu-rdns` and `rdns-manager` in `/usr/local/sbin/`.
+  - Complete environment purging in `uninstall.sh`.
+
+### Removed
+- Removed deprecated legacy `rclone` binary installation and system service from `install.sh`.
+
 ## [5.3.0] - 2026-09-10
 
 Comprehensive audit, authentic NoobzVPN core daemon alignment, and missing feature implementation release: **Release 5.3.0**. Resolves all incomplete integrations, brings `noobzvpns` CLI execution into 100% compliance with upstream specifications (`COMMANDLINE.MD`), introduces automated expiration for NoobzVPN (`xp-noobz`), implements SSH recovery API handler (`recovery-ssh`), enhances multi-protocol bulk generation and user checking, bolsters `/etc/api` backup/restore resilience, synchronizes SSL certificates across domains, and updates all documentation.
@@ -319,6 +350,7 @@ First public beta. Developed for **Rocky Linux 9**.
 - Legacy `.txt` account files and `config.json` comment markers.
 - Ads Block (helium) menu entry.
 
+[5.4.0]: https://github.com/risqinf/autoscript/releases/tag/v5.4.0
 [5.3.0]: https://github.com/risqinf/autoscript/releases/tag/v5.3.0
 [5.2.0]: https://github.com/risqinf/autoscript/releases/tag/v5.2.0
 [5.0.0]: https://github.com/risqinf/autoscript/releases/tag/v5.0.0

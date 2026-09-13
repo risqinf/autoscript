@@ -3,11 +3,11 @@
 # Project: Autoscript VPN by risqinf
 # Description: AutoScript VPN & Tunneling Management System
 # Developed for Rocky Linux 9
-# Version: 5.3.0
+# Version: 5.4.0
 # License: Apache License 2.0 (see LICENSE file)
 # Repository: https://github.com/risqinf/autoscript
 # ========================================================
-AS_VERSION="5.3.0"
+AS_VERSION="5.4.0"
 # --- Color Definitions ---
 NC='\033[0m'
 RED='\033[0;31m'
@@ -279,6 +279,13 @@ menu_install_logic() {
     name=$(basename "$file" .sh)
     install -m 0755 "$file" "/usr/local/sbin/api/$name"
   done
+
+  # Install RDNS presets into /usr/local/sbin/rdns/presets and /etc/rdns/presets
+  if [[ -d "$srcdir/scripts/rdns/presets" ]]; then
+    mkdir -p /usr/local/sbin/rdns/presets /etc/rdns/presets
+    cp -rf "$srcdir/scripts/rdns/presets/"*.json /usr/local/sbin/rdns/presets/ 2>/dev/null || true
+    cp -rf "$srcdir/scripts/rdns/presets/"*.json /etc/rdns/presets/ 2>/dev/null || true
+  fi
 
   # Install the API & Uninstaller helper commands
   [[ -f "$srcdir/install-api.sh" ]] && install -m 0755 "$srcdir/install-api.sh" /usr/local/sbin/install-api
