@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # ========================================================
 # Project: Autoscript VPN by risqinf
-# Description: Unified account lookup across all protocols (DB-driven)
+# Description: Unified account lookup across all protocols (with Quota & SSH Breakdown)
 # License: Apache License 2.0 (see LICENSE file)
 # Repository: https://github.com/risqinf/autoscript
 # ========================================================
@@ -30,17 +30,29 @@ vmess_link() {
 }
 
 found=0
-while IFS='|' read -r proto secret iplim qb exp status; do
+while IFS='|' read -r proto secret iplim qb ub exp status; do
   [[ -z "$proto" ]] && continue
   found=1
   [[ "$iplim" == "0" ]] && iplim="Unlimited"
-  [[ "$qb" == "0" || -z "$qb" ]] && quota="Unlimited" || quota="$(( qb / 1073741824 )) GB"
+  used_h=$(human_bytes "${ub:-0}")
+  [[ "$qb" == "0" || -z "$qb" ]] && quota="Unlimited" || quota=$(human_bytes "$qb")
+  quota_summary="${used_h} / ${quota}"
+
   if [[ "$proto" == "ssh" ]]; then
-    ssh_print_cli "$user" "$secret" "$iplim" "$exp" "$quota" "SSH ACCOUNT ($status)"
+    ssh_print_cli "$user" "$secret" "$iplim" "$exp" "$quota_summary" "SSH ACCOUNT ($status)"
+    echo -e " ${WHITE}SSH All-Protocol Usage Breakdown:${NC}"
+    has_sp=0
+    while IFS='|' read -r sp rx tx tot; do
+      [[ -z "$sp" ]] && continue
+      has_sp=1
+      echo -e "   ${CYAN}• ${sp}${NC}: $(human_bytes "$tot") (RX $(human_bytes "$rx") / TX $(human_bytes "$tx"))"
+    done < <(db_get_ssh_proto_usage "$user")
+    [[ $has_sp -eq 0 ]] && echo -e "   ${YELLOW}• No protocol traffic recorded yet.${NC}"
+    ui_foot
     continue
   fi
   if [[ "$proto" == "noobz" ]]; then
-    noobz_print_cli "$user" "$secret" "$iplim" "$exp" "$quota" "NOOBZVPN ACCOUNT ($status)"
+    noobz_print_cli "$user" "$secret" "$iplim" "$exp" "$quota_summary" "NOOBZVPN ACCOUNT ($status)"
     continue
   fi
   ui_header "${proto^^} ACCOUNT (${status})"
@@ -50,7 +62,7 @@ while IFS='|' read -r proto secret iplim qb exp status; do
     vless)
       ui_kv "UUID"     "$secret"
       ui_kv "Net/Path" "ws  /vless   (443 TLS / 80 HTTP)"
-      ui_kv "Quota"    "$quota"
+      ui_kv "Usage"    "$quota_summary"
       ui_kv "Limit IP" "$iplim"
       ui_kv "Expired"  "$exp"
       ui_rule
@@ -62,7 +74,7 @@ while IFS='|' read -r proto secret iplim qb exp status; do
     vmess)
       ui_kv "UUID"     "${secret}  (AlterId 0)"
       ui_kv "Net/Path" "ws  /  multipath   (443 TLS / 80 HTTP)"
-      ui_kv "Quota"    "$quota"
+      ui_kv "Usage"    "$quota_summary"
       ui_kv "Limit IP" "$iplim"
       ui_kv "Expired"  "$exp"
       ui_rule
@@ -74,7 +86,7 @@ while IFS='|' read -r proto secret iplim qb exp status; do
     trojan)
       ui_kv "Key"      "$secret"
       ui_kv "Net/Path" "ws  /trojan   (443 TLS)"
-      ui_kv "Quota"    "$quota"
+      ui_kv "Usage"    "$quota_summary"
       ui_kv "Limit IP" "$iplim"
       ui_kv "Expired"  "$exp"
       ui_rule
@@ -83,7 +95,7 @@ while IFS='|' read -r proto secret iplim qb exp status; do
       ;;
   esac
   ui_foot
-done < <(db_query "SELECT protocol, secret, limit_ip, quota_bytes,
+done < <(db_query "SELECT protocol, secret, limit_ip, quota_bytes, used_bytes,
                           datetime(expired_at,'unixepoch','localtime'), status
                    FROM accounts
                    WHERE username='$(sql_escape "$user")' AND status!='deleted'

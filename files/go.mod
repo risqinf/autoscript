@@ -1,6 +1,6 @@
 module github.com/risqinf/autoscript-api
 
-go 1.26.4
+go 1.25.0
 
 require (
 	github.com/fasthttp/router v1.5.4

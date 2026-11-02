@@ -1,24 +1,31 @@
 [Unit]
-Description=Autoscript VPN API Server
+Description=Autoscript VPN Enterprise API Server (v5.5.0)
 Documentation=https://github.com/risqinf/autoscript
-After=network.target xray.service
+After=network.target xray.service dropbear.service
+Wants=network-online.target
 
 [Service]
 Type=simple
 User=root
+WorkingDirectory=/root
 ExecStart=/usr/local/bin/api-server
-Restart=on-failure
-RestartSec=5
-TimeoutStopSec=30
+Restart=always
+RestartSec=3
+TimeoutStopSec=20
 
 # Environment
 Environment=API_LISTEN=127.0.0.1:9000
 Environment=API_DB_PATH=/etc/api/api.db
 Environment=MAIN_DB_PATH=/etc/xray/xray.db
+Environment=API_SECRET_FILE=/etc/api/secret
+Environment=API_SECURITY_MODE=strict
+Environment=XRAY_CONFIG=/etc/xray/config.json
+Environment=XRAY_BIN=/usr/local/bin/xray
 
-# Performance
-LimitNOFILE=1000000
-LimitNPROC=10000
+# Performance & Security
+LimitNOFILE=1048576
+LimitNPROC=65535
+NoNewPrivileges=false
 
 [Install]
 WantedBy=multi-user.target

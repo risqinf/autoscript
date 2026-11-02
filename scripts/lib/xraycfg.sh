@@ -22,35 +22,40 @@ cfg_tag() {
   esac
 }
 
-# Apply a jq filter atomically: write temp, validate JSON, xray -test, then
+# Apply a jq filter atomically under flock: write temp, validate JSON, xray -test, then
 # replace. Rolls back on any failure. Args: jq_filter [jq_args...]
 cfg_apply() {
   local filter="$1"; shift
-  local tmp bak
-  tmp="$(mktemp)"; bak="${AS_CONFIG}.bak.$$"
+  local lockfile="/run/autoscript-xraycfg.lock"
+  mkdir -p /run 2>/dev/null
+  (
+    flock -w 15 200 || { err "timeout waiting for xray config lock"; exit 1; }
+    local tmp bak
+    tmp="$(mktemp)"; chmod 600 "$tmp" 2>/dev/null
+    bak="${AS_CONFIG}.bak.$$"
 
-  if ! jq "$@" "$filter" "$AS_CONFIG" > "$tmp" 2>/dev/null; then
-    rm -f "$tmp"; err "jq transform failed"; return 1
-  fi
-  # Must still be valid JSON and non-empty.
-  if ! jq -e . "$tmp" >/dev/null 2>&1; then
-    rm -f "$tmp"; err "resulting config is not valid JSON"; return 1
-  fi
-
-  cp -f "$AS_CONFIG" "$bak"
-  cp -f "$tmp" "$AS_CONFIG"
-  rm -f "$tmp"
-
-  # Validate with xray if available.
-  if [[ -x "$AS_XRAY_BIN" ]]; then
-    if ! "$AS_XRAY_BIN" -test -config "$AS_CONFIG" >/dev/null 2>&1; then
-      mv -f "$bak" "$AS_CONFIG"
-      err "xray -test failed; configuration rolled back"
-      return 1
+    if ! jq "$@" "$filter" "$AS_CONFIG" > "$tmp" 2>/dev/null; then
+      rm -f "$tmp"; err "jq transform failed"; exit 1
     fi
-  fi
-  rm -f "$bak"
-  return 0
+    if ! jq -e . "$tmp" >/dev/null 2>&1; then
+      rm -f "$tmp"; err "resulting config is not valid JSON"; exit 1
+    fi
+
+    cp -pf "$AS_CONFIG" "$bak"
+    cp -f "$tmp" "$AS_CONFIG"
+    chmod 600 "$AS_CONFIG" 2>/dev/null
+    rm -f "$tmp"
+
+    if [[ -x "$AS_XRAY_BIN" ]]; then
+      if ! "$AS_XRAY_BIN" -test -config "$AS_CONFIG" >/dev/null 2>&1; then
+        mv -f "$bak" "$AS_CONFIG"
+        err "xray -test failed; configuration rolled back"
+        exit 1
+      fi
+    fi
+    rm -f "$bak"
+    exit 0
+  ) 200>"$lockfile"
 }
 
 # Does a client email exist in any inbound?
@@ -102,5 +107,21 @@ cfg_del_client() {
     (.inbounds[] | select(.protocol==$proto and .settings.clients != null) | .settings.clients)
       |= map(select(.email != $u))
   ' --arg proto "$proto" --arg u "$user"
+}
+
+# Batch-add an array of pre-built JSON client objects to all inbounds for a protocol
+# in one atomic write + single xray -test validation.
+# Args: protocol json_clients_array
+cfg_add_clients_batch() {
+  local proto="$1" clients_json="$2"
+  case "$proto" in
+    vless|vmess|trojan) ;;
+    *) err "unknown protocol: $proto"; return 1 ;;
+  esac
+  [[ -z "$clients_json" || "$clients_json" == "[]" ]] && return 0
+
+  cfg_apply '
+    (.inbounds[] | select(.protocol==$proto and .settings.clients != null) | .settings.clients) += $clients
+  ' --arg proto "$proto" --argjson clients "$clients_json"
 }
 

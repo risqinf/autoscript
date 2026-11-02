@@ -43,6 +43,7 @@ new_epoch=$(( $(date +%s) + days * 86400 ))
 exp_system=$(date -d "@${new_epoch}" +%Y-%m-%d)
 
 if id "$user" &>/dev/null; then
+  usermod -U "$user" 2>/dev/null || true
   chage -E "$exp_system" "$user" 2>/dev/null
 else
   nologin=$(ensure_nologin_shell); [[ -z "$nologin" ]] && nologin=/usr/sbin/nologin
@@ -52,7 +53,6 @@ fi
 
 db_set_expired "ssh" "$user" "$new_epoch"
 db_audit "recover" "ssh" "$user" "+${days}d"
-systemctl restart dropbear >/dev/null 2>&1
 ok "Recovered '$user' (expires in ${days} days)."
 line
 read -n 1 -s -r -p "Press any key to menu..."

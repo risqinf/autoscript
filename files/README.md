@@ -1,139 +1,40 @@
-# Autoscript VPN API Server
+# Autoscript VPN Enterprise API Server (`v5.5.0`)
 
-RESTful API server for managing VPN accounts (SSH, VLESS, VMESS, Trojan, NoobzVPN).
+High-throughput, security-hardened Go RESTful API daemon for Autoscript VPN on **Rocky Linux 9** (SSH All-Protocol, VLESS, VMESS, Trojan, NoobzVPN, SlowDNS, OpenVPN).
 
-## Tech Stack
+## Highlights
 
-- **Language**: Go 1.22+
-- **HTTP**: FastHTTP (high-performance)
-- **Database**: SQLite (modernc.org/sqlite, no CGO)
-- **Architecture**: Clean Architecture (handler → service → repository)
+- **5-Layer Strict SHA-256 Request Verification** (`Authorization: Bearer` SHA-256 digest + `X-Content-SHA256` + `X-Timestamp` + `X-Nonce` 256-shard anti-replay + `X-Signature` canonical HMAC-SHA256) & **Mutual Server Response Signatures** (`X-Server-Signature`).
+- **Million-Request Concurrency**: Atomic in-memory token digests, 256-shard rate limiter, `Singleflight` request coalescing + micro-TTL snapshots, async ring-buffered SQLite audit logger, and separated SQLite WAL reader/writer connection pools.
+- **Flash-Sale Bulk Provisioning**: Create, renew, or delete up to **1,000 accounts in 1 single HTTP request** with single-pass native Go Xray JSON mutation + `X-Idempotency-Key` support.
+- **SSH All-Protocol Quota & Deep Live Telemetry**: Real-time quota & session tracking across OpenSSH (`22, 3303`), Dropbear (`109, 143`), Direct SSH SSL/TLS (`443, 8443`), SSH-WS (`80, 8080, 8888, 443`), SlowDNS (`53, 5300`), and OpenVPN (`1194`), enriched with **Accessed Apps/Domains**, **ISP/ASN**, and **GeoIP Location**.
 
-## Project Structure
+## Package Architecture
 
 ```
 files/
-├── cmd/server/main.go          # Entry point, DI wiring
+├── cmd/server/main.go               # Entrypoint, WAL pool separation & DI wiring
 ├── internal/
-│   ├── config/                 # Configuration loader
-│   ├── model/                  # Data structures
-│   ├── handler/                # HTTP request handlers
-│   ├── service/                # Business logic
-│   ├── repository/             # Database access
-│   ├── middleware/             # Auth, logging, rate limiting
-│   ├── router/                 # Route definitions
-│   └── validator/              # Input validation
-├── migrations/                 # Database migrations
-└── api-server.service          # Systemd service unit
+│   ├── cache/singleflight.go        # Singleflight snapshot cache & sharded IdempotencyStore
+│   ├── config/config.go             # RAM-tiered configuration & secret loader
+│   ├── security/verifier.go         # 5-Layer SHA-256 verifier & mutual response signer
+│   ├── middleware/middleware.go     # Auth, 256-shard rate limiter & async batch logger
+│   ├── model/                       # Typed request, response, quota & telemetry models
+│   ├── validator/validator.go       # Strict allowlist & injection-proof validators
+│   ├── repository/                  # Separated read/write SQLite WAL repositories
+│   ├── service/                     # Account bulk engine, native Xray mutator, GeoIP & App detector
+│   ├── handler/                     # FastHTTP handlers
+│   └── router/router.go             # `/api` & `/api/v1` route registration
+└── api-server.service               # Systemd unit file
 ```
 
-## API Endpoints
-
-Supported `{protocol}`: `ssh`, `vless`, `vmess`, `trojan`, `noobz`.
-
-### Health
-- `GET /api/health` - Health check (no auth)
-
-### Accounts
-- `POST /api/accounts/{protocol}` - Create account
-- `GET /api/accounts/{protocol}` - List accounts
-- `GET /api/accounts/{protocol}/{username}` - Get account
-- `PUT /api/accounts/{protocol}/{username}` - Update account
-- `DELETE /api/accounts/{protocol}/{username}` - Delete account
-- `POST /api/accounts/{protocol}/{username}/renew` - Renew account
-- `POST /api/accounts/{protocol}/{username}/recovery` - Recover account
-
-### Trials
-- `POST /api/trials/{protocol}` - Create trial account
-
-### Config
-- `GET /api/config/{protocol}/{username}` - Get config link
-- `GET /api/config/openvpn/{username}` - Download .ovpn file
-
-### Monitoring
-- `GET /api/status` - Service status
-- `GET /api/monitor/{protocol}` - Login monitor (active IP/device tracking)
-- `GET /api/bandwidth` - Bandwidth stats
-
-### System
-- `GET /api/system/info` - System information
-- `GET /api/system/services` - Service list
-- `GET /api/system/slowdns` - SlowDNS status, nameserver, and public key
-
-## Authentication
-
-All endpoints (except `/api/health`) require Bearer token authentication:
-
-```bash
-curl -H "Authorization: Bearer <token>" https://domain/api/accounts/ssh
-```
-
-## Response Format
-
-### Success
-```json
-{
-  "success": true,
-  "code": 200,
-  "message": "Account retrieved successfully",
-  "data": { ... }
-}
-```
-
-### Error
-```json
-{
-  "success": false,
-  "code": 404,
-  "error": {
-    "type": "NOT_FOUND",
-    "message": "Account not found",
-    "details": []
-  }
-}
-```
-
-## Build
+## Build & Test
 
 ```bash
 cd files
-go build -o api-server ./cmd/server
+go vet ./...
+go test -race -v ./...
+CGO_ENABLED=0 go build -trimpath -ldflags="-s -w -X main.Version=v5.5.0" -o api-server ./cmd/server/main.go
 ```
 
-## Install
-
-```bash
-# Build
-cd files
-go build -o /usr/local/bin/api-server ./cmd/server
-
-# Install systemd service
-cp api-server.service /etc/systemd/system/
-systemctl daemon-reload
-systemctl enable api-server --now
-```
-
-## Configuration
-
-Environment variables (with defaults):
-
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `API_LISTEN` | `127.0.0.1:9000` | Listen address |
-| `API_DB_PATH` | `/etc/api/api.db` | API database path |
-| `MAIN_DB_PATH` | `/etc/xray/xray.db` | Main database path |
-| `RATE_LIMIT` | `100` | Requests per window |
-| `RATE_LIMIT_WINDOW` | `60` | Window in seconds |
-
-## Databases
-
-- **API Database** (`/etc/api/api.db`): Tokens, rate limits, audit logs
-- **Main Database** (`/etc/xray/xray.db`): Account data (shared with bash scripts)
-
-## Security
-
-- Bearer token authentication
-- Rate limiting per IP
-- Input validation
-- Constant-time token comparison
-- No sensitive data in logs
+For full endpoint schemas and multi-language SHA-256 signing examples, see [`../docs/API.md`](../docs/API.md).

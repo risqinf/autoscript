@@ -3,6 +3,41 @@
 All notable changes to this project are documented here.
 This project adheres to [Semantic Versioning](https://semver.org/).
 
+## [5.5.0] - 2026-11-02
+
+Major Enterprise Performance, Multi-Layer Cryptographic Security, SSH All-Protocol Quota, Deep Live Session Telemetry, Flash-Sale Bulk Provisioning, and Extreme Rocky Linux 9 Optimization release: **Release 5.5.0**.
+
+### Fixed
+- **Firewalld & Rocky Linux 9 SELinux / Nginx `Permission denied` Remediation (`scripts/system/fix-firewall.sh` & `install.sh`)**:
+  - Fixed `nginx: [emerg] bind() to 127.0.0.1:82 failed (13: Permission denied)` and upstream `502 Bad Gateway` errors on Rocky Linux 9 by registering internal proxy/API ports (`81, 82, 8080, 8443, 8888, 8585, 9000, 10011..10033`) into SELinux `http_port_t` and enabling `httpd_can_network_connect`, `httpd_can_network_relay`, `httpd_setrlimit`, and `haproxy_connect_any`.
+  - Opened all missing public TCP/UDP VPN ports in `firewalld` (`22, 3303, 109, 143, 80, 8080, 8880, 2052, 2082, 2086, 2095, 443, 8443, 2053, 2083, 2087, 2096, 8888, 1194, 3128, 8000, 8585` TCP; `53, 5300, 443, 8443, 1194, 2200, 7100, 7200, 7300` UDP) while locking down internal ports (`81, 82, 8081, 9000, 10085`).
+  - Added missing `location /api/` and `location /risqinf/` blocks to Nginx's `:82` HTTP/2 listener (`risqinf.conf`) so HTTPS clients negotiating ALPN `h2` via HAProxy `:443` reach the Go REST API cleanly.
+- **Process-Isolated SSH Session Termination (`scripts/lib/account.sh`, `files/internal/service/account.go`, `install.sh`)**:
+  - Configured `KillMode=process` on `dropbear.service` and replaced global `systemctl restart dropbear` calls during user deletion/suspension/expiry with targeted per-user PID termination so active tunnels of other SSH users are never dropped.
+- **Xray Multi-Protocol Quota Counter Preservation (`scripts/lib/account.sh`)**:
+  - Replaced destructive global `xray api statsquery -reset` with targeted per-user stat resets and single-transaction SQLite updates.
+- **CI/CD Release Pipeline (`.github/workflows/audit.yml` & `.github/workflows/release.yml`)**:
+  - Updated Go toolchain setup to `go-version-file: 'files/go.mod'` and included individual `.sha256` checksum assets in GitHub Releases so `install-api.sh` verifies prebuilt binaries end-to-end.
+
+### Added
+- **SSH All-Protocol Bandwidth Quota Engine (`scripts/ssh/quota-ssh.sh`, `loop-quota-ssh.service`, `ssh_proto_usage` table, `GET /api/quota/ssh`)**:
+  - Real-time monotonic byte accounting and quota enforcement across **OpenSSH (`22, 3303`)**, **Dropbear (`109, 143`)**, **Direct SSH SSL/TLS (`443, 8443`)**, **SSH-WS (`80, 8080, 8888, 443`)**, **SlowDNS (`53, 5300`)**, and **OpenVPN (`1194`)**.
+- **Deep Live Session Telemetry — Accessed Apps/Domains, Transport Protocol, ISP & GeoIP (`GET /api/monitor`, `cek-ssh`, `cek-vless`, `cek-vmess`, `cek-trojan`)**:
+  - Real-time detection of **65+ applications and domains** accessed by connected users (*YouTube, Netflix, TikTok, Instagram, WhatsApp, Telegram, Discord, ChatGPT/OpenAI, Mobile Legends, PUBG, Shopee, Tokopedia*, etc.) via Xray tail-seek log analysis, outbound socket inspection, `nf_conntrack` Virtual IP correlation, and local DNS query telemetry (`dnsmasq-autoscript`).
+  - Automatic **ISP / ASN** and **GeoIP City/Country** enrichment using 3-tier free APIs (`ip-api.com/batch` -> `ipwho.is` -> `freeipapi.com`) with 24-hour RAM and `/run/autoscript-geoip.cache` caching.
+- **Flash-Sale Bulk Account Provisioning on Standard REST Endpoints (`POST /api/accounts/{protocol}`, `PUT /api/accounts/{protocol}`, `DELETE /api/accounts/{protocol}`, `POST /api/trials/{protocol}`, `scripts/system/add-bulk.sh`)**:
+  - Unified single and bulk provisioning directly on standard REST endpoints so existing panels/bots remain 100% compatible while supporting up to **1,000 accounts in 1 single HTTP request** (via `count > 1`, `accounts` array, or top-level JSON array) with single-pass native Go Xray JSON mutation, single Xray reload, single SQLite WAL transaction, single `chpasswd` pipe, and `X-Idempotency-Key` retry deduplication.
+  - Added `suspend`, `unsuspend`, `reset-quota`, `kick`, `system/cleanup`, `auth/verify`, `system/ports`, `system/optimize`, `system/services/{service}/{action}`, `system/audit-logs`, and full `vnstat` `/api/bandwidth`.
+- **Million-Request Concurrency Architecture (`files/`)**:
+  - Atomic in-memory SHA-256 token digest cache, 256-shard in-memory rate limiter, 256-shard anti-replay nonce store, `Singleflight` request coalescing + micro-TTL snapshots, async ring-buffered SQLite audit logger, separated SQLite WAL reader/writer pools, pure-Go `/proc` system readers, and Nginx `upstream api_backend { keepalive 256; }`.
+- **5-Layer Strict SHA-256 + Canonical HMAC-SHA256 Security (`files/internal/security/verifier.go` & `menu-api.sh`)**:
+  - Enforces Layer-0 IP/CIDR policy, Layer-1 constant-time `SHA-256(Bearer)` verification, Layer-2 `X-Content-SHA256` raw payload integrity, Layer-3 `X-Timestamp` anti-drift window, Layer-4 `X-Nonce` sharded anti-replay, Layer-5 `ASv5.5` Double-SHA256 canonical `HMAC-SHA256` signature, and mutual `X-Server-Signature` response headers.
+- **Extreme Rocky Linux 9 Optimization (`scripts/system/optimize-rocky.sh`)**:
+  - Hardware-tiered tuning (`1GB-EXTREME` through `8GB+-ENTERPRISE`) configuring ZRAM compressed swap, `kdump`/`crashkernel=no` reclamation, TCP BBR + `fq`, bounded socket memory on 1GB RAM VPS, `nf_conntrack` sizing, `journald` 16MB cap, and `GOMEMLIMIT` + `XRAY_RAY_BUFFER_SIZE=1` daemon caps.
+
+### Security
+- Eliminated all `--no-check-certificate` flags, unverified binary blobs (`dnstt` now compiled from official upstream Go source), open Squid proxy rules (`http_access allow localhost` only), Xray `127.0.0.0/8` SSRF gaps, UID `1000-65534` localhost internal port access, predictable `/tmp` cookie files, zip-slip archive extraction paths, and `jq` shell-interpolation vectors.
+
 ## [5.4.0] - 2026-09-13
 
 Major feature release: **Release 5.4.0**. Introduces universal Reverse DNS (RDNS) mTLS Yamux stealth pairing client, interactive SkyNode-style TUI manager (`menu-rdns`), CLI engine (`rdns-manager`), collision-avoiding rule presets, main menu service monitoring, and installer/uninstaller cleanup (deprecated rclone removal).
@@ -350,6 +385,7 @@ First public beta. Developed for **Rocky Linux 9**.
 - Legacy `.txt` account files and `config.json` comment markers.
 - Ads Block (helium) menu entry.
 
+[5.5.0]: https://github.com/risqinf/autoscript/releases/tag/v5.5.0
 [5.4.0]: https://github.com/risqinf/autoscript/releases/tag/v5.4.0
 [5.3.0]: https://github.com/risqinf/autoscript/releases/tag/v5.3.0
 [5.2.0]: https://github.com/risqinf/autoscript/releases/tag/v5.2.0

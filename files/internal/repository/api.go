@@ -6,24 +6,40 @@ import (
 	"database/sql"
 	"encoding/hex"
 	"fmt"
+	"os"
+	"strings"
 	"time"
 )
+
+// APILogEntry represents a buffered HTTP audit log record.
+type APILogEntry struct {
+	Timestamp int64
+	Method    string
+	Path      string
+	IP        string
+	Status    int
+	LatencyMs float64
+}
 
 // APIRepository defines the interface for API database operations.
 type APIRepository interface {
 	// Token management
 	CreateToken(ctx context.Context, name string) (string, error)
 	ValidateToken(ctx context.Context, token string) (bool, error)
+	TouchTokenLastUsed(ctx context.Context, token string, unixTs int64) error
 	RevokeToken(ctx context.Context, token string) error
 	ListTokens(ctx context.Context) ([]TokenInfo, error)
+	SyncKeyFile(ctx context.Context, keyFile string) (string, error)
 
-	// Rate limiting
+	// Legacy SQLite rate limiting helpers (kept for interface compatibility)
 	GetRequestCount(ctx context.Context, ip string, window int) (int, error)
 	IncrementRequestCount(ctx context.Context, ip string) error
 	CleanupRateLimits(ctx context.Context) error
 
 	// API audit log
 	LogRequest(ctx context.Context, method, path, ip string, status int, latency time.Duration) error
+	LogRequestBatch(ctx context.Context, entries []APILogEntry) error
+	PruneLogs(ctx context.Context, maxRows int) error
 }
 
 // TokenInfo represents an API token.
@@ -49,9 +65,14 @@ func NewAPIRepositoryImpl(db *sql.DB) *apiRepository {
 	return &apiRepository{db: db}
 }
 
-// InitSchema creates the API database schema.
+// InitSchema creates the API database schema with WAL concurrency pragmas.
 func (r *apiRepository) InitSchema() error {
 	schema := `
+	PRAGMA journal_mode=WAL;
+	PRAGMA synchronous=NORMAL;
+	PRAGMA temp_store=MEMORY;
+	PRAGMA busy_timeout=8000;
+
 	CREATE TABLE IF NOT EXISTS tokens (
 		id INTEGER PRIMARY KEY AUTOINCREMENT,
 		name TEXT NOT NULL,
@@ -83,6 +104,44 @@ func (r *apiRepository) InitSchema() error {
 	return err
 }
 
+// SyncKeyFile ensures that any token present in /etc/api/key is registered in the tokens table,
+// or if no tokens exist anywhere, generates a default token and writes /etc/api/key (0600).
+func (r *apiRepository) SyncKeyFile(ctx context.Context, keyFile string) (string, error) {
+	var fileToken string
+	if keyFile != "" {
+		if data, err := os.ReadFile(keyFile); err == nil {
+			fileToken = strings.TrimSpace(strings.SplitN(string(data), "\n", 2)[0])
+		}
+	}
+
+	if len(fileToken) >= 16 {
+		_, _ = r.db.ExecContext(ctx,
+			`INSERT OR IGNORE INTO tokens (name, token, created_at) VALUES ('keyfile', ?, strftime('%s','now'))`,
+			fileToken,
+		)
+	}
+
+	tokens, err := r.ListTokens(ctx)
+	if err != nil {
+		return "", err
+	}
+	if len(tokens) > 0 {
+		if keyFile != "" && fileToken == "" {
+			_ = os.WriteFile(keyFile, []byte(tokens[0].Token+"\n"), 0600)
+		}
+		return tokens[0].Token, nil
+	}
+
+	tok, err := r.CreateToken(ctx, "default")
+	if err != nil {
+		return "", err
+	}
+	if keyFile != "" {
+		_ = os.WriteFile(keyFile, []byte(tok+"\n"), 0600)
+	}
+	return tok, nil
+}
+
 // CreateToken generates and stores a new API token.
 func (r *apiRepository) CreateToken(ctx context.Context, name string) (string, error) {
 	token, err := generateToken()
@@ -99,7 +158,7 @@ func (r *apiRepository) CreateToken(ctx context.Context, name string) (string, e
 	return token, nil
 }
 
-// ValidateToken checks if a token is valid.
+// ValidateToken checks if a token is valid directly in SQLite (used as fallback; hot path uses atomic memory cache).
 func (r *apiRepository) ValidateToken(ctx context.Context, token string) (bool, error) {
 	query := `SELECT COUNT(*) FROM tokens WHERE token = ?`
 	var count int
@@ -107,14 +166,13 @@ func (r *apiRepository) ValidateToken(ctx context.Context, token string) (bool, 
 	if err != nil {
 		return false, fmt.Errorf("validate token: %w", err)
 	}
-
-	if count > 0 {
-		// Update last_used
-		update := `UPDATE tokens SET last_used = strftime('%s','now') WHERE token = ?`
-		_, _ = r.db.ExecContext(ctx, update, token)
-	}
-
 	return count > 0, nil
+}
+
+// TouchTokenLastUsed updates last_used asynchronously from background flushers.
+func (r *apiRepository) TouchTokenLastUsed(ctx context.Context, token string, unixTs int64) error {
+	_, err := r.db.ExecContext(ctx, `UPDATE tokens SET last_used = ? WHERE token = ?`, unixTs, token)
+	return err
 }
 
 // RevokeToken deletes a token.
@@ -135,7 +193,7 @@ func (r *apiRepository) RevokeToken(ctx context.Context, token string) error {
 
 // ListTokens returns all tokens.
 func (r *apiRepository) ListTokens(ctx context.Context) ([]TokenInfo, error) {
-	query := `SELECT name, token, created_at, last_used FROM tokens ORDER BY created_at DESC`
+	query := `SELECT name, token, created_at, last_used FROM tokens ORDER BY id DESC`
 	rows, err := r.db.QueryContext(ctx, query)
 	if err != nil {
 		return nil, fmt.Errorf("list tokens: %w", err)
@@ -178,18 +236,17 @@ func (r *apiRepository) IncrementRequestCount(ctx context.Context, ip string) er
 	if err != nil {
 		return fmt.Errorf("increment request count: %w", err)
 	}
-
 	return nil
 }
 
-// CleanupRateLimits removes old rate limit entries (called periodically).
+// CleanupRateLimits removes old rate limit entries.
 func (r *apiRepository) CleanupRateLimits(ctx context.Context) error {
 	query := `DELETE FROM rate_limits WHERE timestamp < strftime('%s','now', '-5 minutes')`
 	_, err := r.db.ExecContext(ctx, query)
 	return err
 }
 
-// LogRequest logs an API request.
+// LogRequest logs a single API request.
 func (r *apiRepository) LogRequest(ctx context.Context, method, path, ip string, status int, latency time.Duration) error {
 	query := `INSERT INTO api_log (method, path, ip, status, latency_ms) VALUES (?, ?, ?, ?, ?)`
 	_, err := r.db.ExecContext(ctx, query, method, path, ip, status, latency.Seconds()*1000)
@@ -199,7 +256,48 @@ func (r *apiRepository) LogRequest(ctx context.Context, method, path, ip string,
 	return nil
 }
 
-// generateToken creates a random 32-byte hex token.
+// LogRequestBatch writes buffered API log entries in a single fast SQLite transaction.
+func (r *apiRepository) LogRequestBatch(ctx context.Context, entries []APILogEntry) error {
+	if len(entries) == 0 {
+		return nil
+	}
+
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("begin log batch tx: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	stmt, err := tx.PrepareContext(ctx, `INSERT INTO api_log (ts, method, path, ip, status, latency_ms) VALUES (?, ?, ?, ?, ?, ?)`)
+	if err != nil {
+		return fmt.Errorf("prepare log batch: %w", err)
+	}
+	defer stmt.Close()
+
+	for _, e := range entries {
+		ts := e.Timestamp
+		if ts == 0 {
+			ts = time.Now().Unix()
+		}
+		if _, err := stmt.ExecContext(ctx, ts, e.Method, e.Path, e.IP, e.Status, e.LatencyMs); err != nil {
+			return fmt.Errorf("exec log batch item: %w", err)
+		}
+	}
+
+	return tx.Commit()
+}
+
+// PruneLogs keeps api_log bounded on low-storage 1GB VPS instances.
+func (r *apiRepository) PruneLogs(ctx context.Context, maxRows int) error {
+	if maxRows <= 0 {
+		maxRows = 10000
+	}
+	query := `DELETE FROM api_log WHERE id NOT IN (SELECT id FROM api_log ORDER BY id DESC LIMIT ?)`
+	_, err := r.db.ExecContext(ctx, query, maxRows)
+	return err
+}
+
+// generateToken creates a random 32-byte (64-hex) CSPRNG token.
 func generateToken() (string, error) {
 	bytes := make([]byte, 32)
 	if _, err := rand.Read(bytes); err != nil {

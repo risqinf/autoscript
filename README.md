@@ -1,41 +1,34 @@
 # Autoscript VPN
 
-> Version: **5.4.0** (Release) — see [CHANGELOG.md](CHANGELOG.md).
+> Version: **5.5.0** (Enterprise Release) — see [CHANGELOG.md](CHANGELOG.md).
 
-AutoScript VPN & Tunneling Management System, engineered for **Rocky Linux 9**.
+AutoScript VPN & Tunneling Management System, engineered and extremized for **Rocky Linux 9**.
 
-Enterprise-grade multi-protocol tunneling solution supporting SSH, SlowDNS (DNSTT), NoobzVPN, VLESS, VMESS, Trojan, and OpenVPN TCP with full WebSocket (WS), HTTPUpgrade (HU), XHTTP, and gRPC transport matrix, fronted by HAProxy and Nginx with dynamic auto-tuning and a unified Go RESTful API daemon.
-
----
-
-## Features
-
-- **SSH Stack**: OpenSSH + Dropbear (109) with SSH-over-WebSocket (`GO-TUNNEL PRO`) & BadVPN UDPGW (7300).
-- **SlowDNS (DNSTT)**: High-security DNS Tunneling Server (<15MB RAM footprint, dropbear target) on ports `53/udp` and `5300/udp`.
-- **NoobzVPN Core**: Native integration with authentic hardware device-id tracking (1 device = 1 unique hash), listening on plain HTTP `127.0.0.1:8585` with `identifier = "risqinf"`, proxied via Nginx on `/noobz`.
-- **Full Xray Transport Matrix**: VLESS, VMESS, and Trojan over WebSocket (`ws`), HTTPUpgrade (`hu`), XHTTP (`xhttp`), and gRPC via Xray-core.
-- **OpenVPN TCP**: Single consolidated OpenVPN TCP service (1194) with auto-generated and verified certificates for maximum connection stability.
-- **HAProxy + Nginx Front**: Single-port TLS (443) and HTTP (80) multiplexing with SNI, path, and handshake-based routing.
-- **Go RESTful API Daemon (`api-server`)**: High-performance FastHTTP daemon with token auth, rate limiting, and clean architecture.
-- **SQLite Single Source of Truth**: `/etc/xray/xray.db` (WAL mode, foreign keys, CHECK constraints, audit logging) with soft-delete & recovery across all protocols.
-- **Quota & IP / Device Limit**: Strict bandwidth quota enforcement (in GB) and concurrent connection/device limiter (SSH/VLESS/VMESS/Trojan/Noobz).
-- **Live Login & Session Telemetry**: Real-time access log parser for Xray, `ssh-ws` API session polling, and authentic hardware device hash inspection directly from `/etc/noobzvpns/db_user.json`.
-- **Encrypted Backup & Restore**: Multi-method backup supporting Telegram Bot (File ID), Local Encrypted Zip, and Cloud Vault API (`cloud-vault`).
-- **Dynamic Auto-Tuning**: Automatically sizes Nginx worker connections, HAProxy maxconn, TCP memory buffers, file limits, and swap space based on host RAM and CPU cores.
-- **SkyNode-Style Terminal UI**: Clean, adaptive ASCII interface optimized for mobile terminals (Termux/PuTTY).
+Enterprise-grade multi-protocol tunneling platform supporting **SSH All-Protocol** (OpenSSH, Dropbear, Direct SSH SSL/TLS, SSH-WS, SlowDNS DNSTT, OpenVPN), **NoobzVPN**, **VLESS**, **VMESS**, and **Trojan** with full WebSocket (`ws`), HTTPUpgrade (`hu`), XHTTP (`xhttp`), and gRPC transport matrix, fronted by HAProxy + Nginx HTTP/1.1 & HTTP/2, extreme 1 vCPU / 1 GB RAM Rocky Linux kernel/ZRAM optimization, and a million-request-ready **Go RESTful API daemon** protected by **5-Layer Strict SHA-256 + Canonical HMAC-SHA256 verification**.
 
 ---
 
-## Auto-Tuning Engine
+## Key Features (v5.5.0)
 
-The installer automatically inspects hardware resources and applies optimized kernel and proxy parameters:
+- **SSH All-Protocol Quota & Live Session Engine**: Tracks and enforces bandwidth quota across **OpenSSH (`22, 3303`)**, **Dropbear (`109, 143`)**, **Direct SSH SSL/TLS (`443, 8443`)**, **SSH WebSocket (`80, 8080, 8888, 443`)**, **SlowDNS (`53, 5300` UDP)**, and **OpenVPN (`1194` TCP)** via monotonic kernel TCP byte accounting (`loop-quota-ssh.service` + `ssh_proto_usage` SQLite WAL table).
+- **Real-Time Accessed Apps/Domains, Protocol, ISP & GeoIP Telemetry**: Inspect live connected users with automatic classification of **65+ apps/domains** (*YouTube, Netflix, TikTok, Instagram, WhatsApp, Telegram, ChatGPT/OpenAI, Mobile Legends, Shopee*, etc.), exact transport protocol, ISP/ASN, and GeoIP city/country via 3-tier free GeoIP APIs (`ip-api.com` -> `ipwho.is` -> `freeipapi.com` with 24h caching).
+- **Flash-Sale Bulk Provisioning on Standard Endpoints**: Create, renew, or delete **1 OR up to 1,000 accounts in 1 single API request** directly on the standard REST endpoints (`POST /api/accounts/{protocol}`, `PUT /api/accounts/{protocol}`, `DELETE /api/accounts/{protocol}`, `POST /api/trials/{protocol}`, plus `add-bulk` CLI) using single-pass native Go Xray JSON mutation, single Xray reload, single SQLite WAL transaction, and `X-Idempotency-Key` deduplication.
+- **Million-Request Concurrency Architecture**: Atomic in-memory SHA-256 token digest cache, 256-shard lock-free/fine-grained rate limiter, 256-shard anti-replay nonce cache, `Singleflight` request coalescing + micro-TTL snapshots, separated SQLite WAL reader/writer pools, and Nginx `upstream api_backend { keepalive 256; }`.
+- **5-Layer Strict SHA-256 Cryptographic API Security**: Constant-time `Bearer` SHA-256 verification + `X-Content-SHA256` payload hash + `X-Timestamp` drift window + `X-Nonce` anti-replay + `X-Signature` Double-SHA256 canonical HMAC-SHA256 + mutual `X-Server-Signature` response headers.
+- **Extreme Rocky Linux 9 Optimization (`optimize-rocky`)**: Supports **hundreds of concurrent users even on 1 vCPU / 1 GB RAM** via ZRAM compressed swap, `kdump`/`crashkernel=no` RAM reclamation, TCP BBR + `fq`, bounded socket buffers, `nf_conntrack` tuning, and `GOMEMLIMIT` + `XRAY_RAY_BUFFER_SIZE=1` daemon caps.
+- **Complete Firewalld & SELinux Healing (`fix-firewall`)**: Configures all public TCP/UDP ports, SELinux booleans (`httpd_can_network_connect`, `httpd_setrlimit`, `haproxy_connect_any`), `semanage port` (`81, 82, 8080, 8443, 8888, 8585, 9000, 10011..10033` in `http_port_t`), and HTTP/2 `:82` `/api/` routing so Nginx never hits `Permission denied`.
+- **Zero-Backdoor & Zero-Vulnerability Hardening**: 100% TLS-verified downloads, official Go-compiled `dnstt`, locked-down localhost Squid, Xray `127.0.0.0/8` SSRF block, UID `1000-65534` localhost SSRF iptables filter, zip-slip archive protection, and process-isolated SSH session termination (`KillMode=process`).
 
-| RAM Tier | Nginx Conn/Worker | HAProxy Maxconn | TCP Buffers | Swap Size | Swappiness |
-|---|---|---|---|---|---|
-| **≤ 1 GB** | 4,096 | 8,192 | 16 MB | 2 GB | 60 |
-| **≤ 2 GB** | 16,384 | 32,768 | 32 MB | 2 GB | 15 |
-| **≤ 4 GB** | 65,535 | 100,000 | 64 MB | 4 GB | 15 |
-| **> 4 GB** | 131,072 | 200,000 | 128 MB | 4 GB | 15 |
+---
+
+## Extreme Rocky Linux 9 Auto-Tuning Profiles
+
+| RAM Tier | Profile | ZRAM Swap | Nginx Conn/Worker | HAProxy Maxconn | API Max Concurrency | Daemon Caps |
+|---|---|---|---|---|---|---|
+| **≤ 1.5 GB** | `1GB-EXTREME` | 75% RAM (`zstd`/`lzo-rle`) | 8,192 | 16,384 | 65,536 | Xray `180MiB`, API `96MiB`, SSH-WS `64MiB` |
+| **≤ 3 GB** | `2GB-OPTIMIZED` | 50% RAM | 16,384 | 32,768 | 262,144 | Xray `384MiB`, API `192MiB`, SSH-WS `128MiB` |
+| **≤ 6 GB** | `4GB-HIGH` | 50% RAM | 65,535 | 100,000 | 262,144 | Xray `768MiB`, API `384MiB`, SSH-WS `256MiB` |
+| **> 6 GB** | `8GB+-ENTERPRISE` | 2,048 MB | 131,072 | 200,000 | 1,048,576 | Uncapped / Enterprise |
 
 ---
 
@@ -43,147 +36,58 @@ The installer automatically inspects hardware resources and applies optimized ke
 
 | Service | Port / Protocol | Forwarding / Backend | Description |
 |---|---|---|---|
-| **OpenSSH** | `22`, `3303` / TCP | Direct | VPS Remote Administration |
-| **Dropbear** | `109` / TCP | Direct / Internal | Primary SSH Service |
-| **HTTP Web** | `80` / TCP | HAProxy → Nginx | HTTP Web, ACME SSL, HTTPUpgrade, WebSocket |
-| **HTTPS / TLS** | `443` / TCP | HAProxy → Nginx → Backends | Multi-Protocol TLS multiplexer |
-| **SlowDNS (DNSTT)** | `53`, `5300` / UDP | `dnstt-server` → Dropbear (`109`) | DNS Stealth Tunneling |
-| **NoobzVPN** | `8585` / TCP | `127.0.0.1:8585` & Nginx `/noobz` | NoobzVPN TCP direct & WebSocket |
-| **BadVPN / UDPGW** | `7300` / UDP | `ssh-ws` daemon | UDP Forwarding (Gaming/VoIP) |
-| **OpenVPN** | `1194` / TCP | `openvpn-server` | OpenVPN TCP tunnel |
-
-### Internal Localhost Ports (`127.0.0.1`)
-- Xray API: `10085`
-- Nginx Local Forwarding: `81`, `82`
-- SSH WebSocket Proxy: `8888`
-- SSH WebSocket API: `8081`
-- NoobzVPN Daemon: `8585`
-- Go RESTful API Daemon: `9000`
+| **OpenSSH** | `22`, `3303` / TCP | Direct | OpenSSH Direct Tunnel & Admin |
+| **Dropbear** | `109`, `143` / TCP | Direct / Internal | Dropbear SSH Backend |
+| **HTTP Multiplexer** | `80`, `8080`, `8880`, `2052`, `2082`, `2086`, `2095` / TCP | HAProxy → Nginx (`:81`) | HTTP WS, HTTPUpgrade, XHTTP, REST API |
+| **HTTPS / TLS Multiplexer** | `443`, `8443`, `2053`, `2083`, `2087`, `2096` / TCP | HAProxy → Nginx (`:81` H1 / `:82` H2) / `:109` | Direct SSH SSL/TLS, Xray TLS/gRPC, REST API |
+| **SSH WebSocket Direct** | `8888` / TCP | `ssh-ws` daemon → `:109` | GO-TUNNEL PRO WebSocket |
+| **SlowDNS (DNSTT)** | `53`, `5300` / UDP | `dnstt-server` → `:109` | DNS Stealth Tunnel |
+| **OpenVPN** | `1194` / TCP (`2200` UDP) | `openvpn-server` | OpenVPN Tunnel (Status v2 Quota Tracked) |
+| **Squid Proxy** | `3128`, `8000` / TCP | Localhost-restricted | Hardened Non-Open HTTP Proxy |
+| **NoobzVPN** | `8585` / TCP | `noobzvpns` & Nginx `/noobz` | NoobzVPN TCP & WebSocket |
+| **BadVPN / UDPGW** | `7100`, `7200`, `7300` / UDP | `ssh-ws` UDPGW | Gaming & VoIP UDP Relay |
 
 ---
 
 ## Installation
 
 ### Requirements
-- **OS**: Rocky Linux 9 (x86_64 or aarch64)
-- **Privileges**: Root access (`sudo -i`)
-- **DNS**: Domain or subdomain pointed (A Record) to VPS IP
+- **OS**: Rocky Linux 9 (`x86_64` or `aarch64`)
+- **Minimum Specs**: 1 vCPU / 1 GB RAM (supports hundreds of concurrent users with `1GB-EXTREME` profile)
+- **Privileges**: Root (`sudo -i`)
+- **DNS**: Domain / subdomain A record pointed to server IP
 
-### 1-Line Command
+### 1-Line Installation Command
 ```bash
-dnf install epel-release -y ; dnf update -y ; dnf install wget curl openssl screen -y ; mkdir -p /run/screen ; chmod 777 /run/screen ; curl -sSL -o install.sh https://raw.githubusercontent.com/risqinf/autoscript/main/install.sh || wget -q -O install.sh https://raw.githubusercontent.com/risqinf/autoscript/main/install.sh ; chmod +x install.sh ; screen -S autoscript ./install.sh ; if [ $? -ne 0 ]; then rm -f install.sh; fi
+dnf install epel-release -y && dnf install wget curl openssl screen -y && mkdir -p /run/screen && chmod 700 /run/screen && curl -fsSL --proto '=https' --tlsv1.2 -o install.sh https://raw.githubusercontent.com/risqinf/autoscript/main/install.sh && chmod +x install.sh && screen -S autoscript ./install.sh
 ```
 
-*If your connection drops during installation, reconnect and run `screen -r autoscript`.*
-
----
-
-## Management Menu
-
-To open the interactive control dashboard, simply run:
+### Standalone API Server Install / Upgrade
 ```bash
-menu
-```
-
-### Menu Structure
-```
-ENTERPRISE VPN MANAGER (v5.4.0)
-├── Accounts Summary: SSH [ # ]  VLESS [ # ]  VMESS [ # ]  TROJAN [ # ]  NOOBZ [ # ]
-├── Services Status : SSH+WS, SlowDNS, Xray, Nginx, HAProxy, OpenVPN, Squid, NoobzVPN, API, RDNS Tunnel
-│
-├── ACCOUNT PANELS
-│   ├── 1) SSH / OpenVPN Panel    (add, trial, delete, renew, list, config, recovery, cek, slowdns)
-│   ├── 2) VLESS Panel            (WS, HTTPUpgrade, XHTTP, gRPC, quota, limit-ip, recovery)
-│   ├── 3) VMESS Panel            (WS, HTTPUpgrade, XHTTP, gRPC, quota, limit-ip, recovery)
-│   ├── 4) TROJAN Panel           (WS, HTTPUpgrade, XHTTP, gRPC, quota, limit-ip, recovery)
-│   └── 5) NoobzVPN Panel         (add, trial, delete, renew, list, config, recovery, live device-id check, xp-noobz)
-│
-├── TOOLS
-│   ├── 6) Auto Bulk Create       (Generate batch accounts)
-│   ├── 7) Account Cleaner        (Purge expired / deleted records)
-│   ├── 8) User Checker           (Realtime multi-protocol login viewer)
-│   └── 9) API Menu               (Generate & manage RESTful API tokens)
-│
-└── SERVER
-    ├── 10) System Menu           (Domain, SSL, DNS, Speedtest, BBR, Dropbear, Timers)
-    ├── 11) Backup / Restore      (Telegram Bot, Manual Zip, Cloud Vault)
-    └── 12) RDNS Client           (mTLS Stealth Tunnel, Token Pairing, Preset Rules)
+curl -fsSL --proto '=https' --tlsv1.2 https://raw.githubusercontent.com/risqinf/autoscript/main/install-api.sh | bash
 ```
 
 ---
 
-## Request Routing Matrix (HAProxy + Nginx)
+## Management Menu & CLI Utilities
 
-Single TLS port (443) and HTTP port (80) multiplexes every protocol through Nginx:
-
-| Path / Signature | Target Service | Backend Protocol |
-|---|---|---|
-| `/vless` | `127.0.0.1:1` | Xray VLESS WebSocket |
-| `/vless-hu` | `127.0.0.1:1` | Xray VLESS HTTPUpgrade |
-| `/vless-xhttp` | `127.0.0.1:1` | Xray VLESS XHTTP |
-| `vless-grpc` | `127.0.0.1:1` | Xray VLESS gRPC |
-| `/vmess` | `127.0.0.1:3` | Xray VMESS WebSocket |
-| `/vmess-hu` | `127.0.0.1:3` | Xray VMESS HTTPUpgrade |
-| `/vmess-xhttp` | `127.0.0.1:3` | Xray VMESS XHTTP |
-| `vmess-grpc` | `127.0.0.1:3` | Xray VMESS gRPC |
-| `/trojan` | `127.0.0.1:2` | Xray Trojan WebSocket |
-| `/trojan-hu` | `127.0.0.1:2` | Xray Trojan HTTPUpgrade |
-| `/trojan-xhttp` | `127.0.0.1:2` | Xray Trojan XHTTP |
-| `trojan-grpc` | `127.0.0.1:2` | Xray Trojan gRPC |
-| `/noobz` | `127.0.0.1:8585` | NoobzVPN WebSocket (`noobz_ws`) |
-| `/ssh` | `127.0.0.1:8888` | SSH-WS Proxy (GO-TUNNEL PRO) |
-| `/` with `Sec-WebSocket-Key` | `127.0.0.1:3` | VMESS Root Path multiplex |
-| `/` without header | `127.0.0.1:8888` | SSH WebSocket direct injector |
+- `menu` — Open the interactive SkyNode-styled Enterprise Control Panel
+- `menu-api` — View or rotate API Bearer Token (`/etc/api/key`) & SHA-256 HMAC Secret (`/etc/api/secret`)
+- `fix-firewall` — Auto-heal Firewalld ports, SELinux booleans/ports (`http_port_t`), and Nginx HTTP/2 `/api/` blocks
+- `optimize-rocky` — Apply extreme Rocky Linux 9 kernel, ZRAM, conntrack, and daemon memory optimizations
+- `cek-ssh` / `cek-vless` / `cek-vmess` / `cek-trojan` / `cek-noobz` — Real-time login monitor with **All-Protocol Quota**, **Accessed Apps/Domains**, **ISP**, and **GeoIP**
 
 ---
 
-## Project Structure
+## RESTful API Documentation
 
-```
-autoscript/
-├── install.sh              # Unified installer for Rocky Linux 9
-├── uninstall.sh            # Complete uninstaller and environment purger
-├── VERSION                 # Semantic version file (5.4.0)
-├── LICENSE                 # Apache License 2.0
-├── README.md               # Main project manual
-├── docs/
-│   └── API.md              # Exhaustive RESTful API reference
-├── files/                  # Production Go RESTful API daemon (FastHTTP + SQLite)
-│   ├── cmd/server/         # Server entrypoint and DI container
-│   ├── internal/           # Config, handler, service, repository, model, validator
-│   └── api-server.service  # Systemd daemon configuration
-└── scripts/
-    ├── lib/                # Common shell libraries (common, db, xraycfg, account)
-    ├── menu/               # Interactive menu scripts (menu, menu-ssh, menu-noobz, ...)
-    ├── ssh/                # SSH CLI management commands
-    ├── noobz/              # NoobzVPN CLI commands (add, trial, delete, renew, list, cek, recovery, xp-noobz)
-    ├── vless/              # VLESS CLI commands
-    ├── vmess/              # VMESS CLI commands
-    ├── trojan/             # Trojan CLI commands
-    ├── system/             # System utilities (backup, restore, slowdns, status, ...)
-    └── api/                # Pipe-based shell API compatibility handlers (including recovery-ssh)
-```
+Autoscript ships with a complete Go FastHTTP RESTful API server (`api-server`) listening on `127.0.0.1:9000` and exposed securely at `https://<your-domain>/api`.
 
----
-
-## RESTful API Server
-
-Autoscript includes a native Go RESTful API daemon (`api-server`) listening on `127.0.0.1:9000` (reverse proxied by Nginx at `https://<your-domain>/api`):
-- **Bearer Token Authentication**: Secure token verification via `/etc/api/api.db`.
-- **Full Protocol Coverage**: `ssh`, `vless`, `vmess`, `trojan`, `noobz`.
-- **Native Device & Traffic Telemetry**: Real-time traffic accounting and authentic hardware device hash tracking.
-
-See the complete [API Documentation](docs/API.md) for full request/response schemas and code examples.
-
----
-
-## Uninstallation
-
-To completely remove Autoscript and restore server settings:
-```bash
-uninstall
-```
-This cleanly stops all systemd services, removes installed binaries, flushes firewall rules (while preserving SSH port 22), and cleans configurations and databases.
+Read the exhaustive [Enterprise API Reference Manual (`docs/API.md`)](docs/API.md) for:
+- Complete **5-Layer SHA-256 + Canonical HMAC-SHA256** request signing & mutual server verification
+- Ready-to-use client SDK code in **Bash, Go, Python, Node.js/TypeScript, and PHP**
+- **Unified Single & Flash-Sale Bulk Creation** (`POST /api/accounts/{protocol}` — 1 to 1,000 accounts/request seamlessly)
+- **SSH All-Protocol Quota** (`GET /api/quota/ssh`) & **Live App/Domain/ISP/GeoIP Telemetry** (`GET /api/monitor`)
 
 ---
 

@@ -293,7 +293,8 @@ fi
 print_info "Installing systemd service..."
 cat >"$SERVICE_FILE" <<'EOF'
 [Unit]
-Description=Autoscript VPN API Server
+Description=Autoscript VPN Enterprise API Server (v5.5.0)
+Documentation=https://github.com/risqinf/autoscript
 After=network.target xray.service dropbear.service
 Wants=network-online.target
 
@@ -303,14 +304,17 @@ User=root
 WorkingDirectory=/root
 Environment=API_PORT=9000
 Environment=API_HOST=127.0.0.1
+Environment=API_LISTEN=127.0.0.1:9000
 Environment=API_DB_PATH=/etc/api/api.db
 Environment=MAIN_DB_PATH=/etc/xray/xray.db
+Environment=API_SECRET_FILE=/etc/api/secret
+Environment=API_SECURITY_MODE=strict
 Environment=XRAY_CONFIG=/etc/xray/config.json
 Environment=XRAY_BIN=/usr/local/bin/xray
 ExecStart=/usr/local/bin/api-server
 Restart=always
-RestartSec=5s
-LimitNOFILE=65535
+RestartSec=3s
+LimitNOFILE=1048576
 
 [Install]
 WantedBy=multi-user.target
@@ -320,11 +324,11 @@ chmod 644 "$SERVICE_FILE"
 systemctl daemon-reload
 print_ok "Systemd service configured: $SERVICE_FILE"
 
-# Ensure Token Exists in SQLite
-print_info "Checking API authentication tokens..."
+# Ensure Token & HMAC Secret Exist
+print_info "Checking API authentication token & SHA-256 HMAC secret..."
 EXISTING_TOKEN=$(sqlite3 "$API_DB_PATH" "SELECT token FROM tokens ORDER BY id DESC LIMIT 1;" 2>/dev/null || true)
 if [[ -z "$EXISTING_TOKEN" ]]; then
-    if [[ -f /etc/api/key ]]; then
+    if [[ -s /etc/api/key ]]; then
         EXISTING_TOKEN=$(head -n 1 /etc/api/key | tr -d '\r\n')
     else
         EXISTING_TOKEN=$(openssl rand -hex 32 2>/dev/null || tr -dc 'a-f0-9' </dev/urandom | head -c 64)
@@ -338,7 +342,16 @@ if [[ -z "$EXISTING_TOKEN" ]]; then
     );" 2>/dev/null || true
     sqlite3 "$API_DB_PATH" "INSERT INTO tokens (name, token, created_at) VALUES ('default', '$EXISTING_TOKEN', strftime('%s','now'));" 2>/dev/null || true
     echo "$EXISTING_TOKEN" > /etc/api/key
-    chmod 600 /etc/api/key
+    chmod 600 /etc/api/key "$API_DB_PATH" 2>/dev/null || true
+fi
+
+API_SECRET_PATH="/etc/api/secret"
+if [[ -s "$API_SECRET_PATH" ]]; then
+    EXISTING_SECRET=$(head -n 1 "$API_SECRET_PATH" | tr -d '\r\n')
+else
+    EXISTING_SECRET=$(openssl rand -hex 32 2>/dev/null || tr -dc 'a-f0-9' </dev/urandom | head -c 64)
+    echo "$EXISTING_SECRET" > "$API_SECRET_PATH"
+    chmod 600 "$API_SECRET_PATH"
 fi
 
 # Enable and start service
@@ -358,19 +371,20 @@ fi
 DOMAIN="127.0.0.1"
 [[ -f /etc/xray/domain ]] && DOMAIN=$(cat /etc/xray/domain)
 
-# Get installed version info
-INSTALLED_VERSION="$("$INSTALL_PATH" --version 2>/dev/null || echo "unknown")"
-
 echo ""
 echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
 echo -e "${GREEN}${BOLD}           API SERVER INSTALLATION SUCCESSFUL!              ${NC}"
 echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
-echo -e " ${WHITE}Version${NC}         : ${CYAN}${LATEST_TAG:-from-source}${NC}"
+echo -e " ${WHITE}Version${NC}         : ${CYAN}${LATEST_TAG:-v5.5.0}${NC}"
+echo -e " ${WHITE}Security Mode${NC}   : ${GREEN}STRICT (5-Layer SHA-256 + HMAC-SHA256)${NC}"
 echo -e " ${WHITE}Endpoint Local${NC}  : ${CYAN}http://127.0.0.1:9000${NC}"
 echo -e " ${WHITE}Endpoint Public${NC} : ${CYAN}https://${DOMAIN}${NC}"
 echo -e " ${WHITE}Health Check${NC}    : ${CYAN}https://${DOMAIN}/api/health${NC}"
-echo -e " ${YELLOW}Active Bearer Token:${NC}"
+echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+echo -e " ${YELLOW}Active Bearer Token (Layer 1):${NC}"
 echo -e " ${GREEN}${BOLD}${EXISTING_TOKEN}${NC}"
+echo -e " ${YELLOW}Active HMAC Secret Key (Layer 5 SHA-256):${NC}"
+echo -e " ${GREEN}${BOLD}${EXISTING_SECRET}${NC}"
 echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
 echo -e " ${WHITE}Quick Commands:${NC}"
 echo -e "   - Open API Menu    : ${CYAN}menu-api${NC}"

@@ -25,6 +25,9 @@ ROWS=(
   "vnstat|vnStat (bandwidth)|-"
   "rsyslog|rsyslog (secure)|-"
   "firewalld|Firewall|-"
+  "zram-autoscript|ZRAM Memory Tier|-"
+  "dnsmasq-autoscript|DNS App Telemetry|5353*"
+  "quota-ssh|SSH All-Proto Quota|-"
   "quota|VLESS quota loop|-"
   "limit-ip-vless|VLESS ip-limit|-"
   "quota-vmess|VMESS quota loop|-"
@@ -72,7 +75,7 @@ show_status() {
     # Hide optional maintenance units that were never installed (reduce noise).
     if ! unit_installed "$unit"; then
       case "$unit" in
-        quota*|limit-ip-*|autoexpire*|backup*|fixlog*|slowdns*|noobzvpns*) continue ;;
+        quota*|limit-ip-*|autoexpire*|backup*|fixlog*|slowdns*|noobzvpns*|zram-*|dnsmasq-*) continue ;;
       esac
     fi
     ((i++))

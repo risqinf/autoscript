@@ -3,11 +3,11 @@
 # Project: Autoscript VPN by risqinf
 # Description: AutoScript VPN & Tunneling Management System
 # Developed for Rocky Linux 9
-# Version: 5.4.0
+# Version: 5.5.0
 # License: Apache License 2.0 (see LICENSE file)
 # Repository: https://github.com/risqinf/autoscript
 # ========================================================
-AS_VERSION="5.4.0"
+AS_VERSION="5.5.0"
 # --- Color Definitions ---
 NC='\033[0m'
 RED='\033[0;31m'
@@ -203,6 +203,17 @@ sed -i 's/#PermitRootLogin.*/PermitRootLogin yes/g' sshd_config
 sed -i 's/#PasswordAuthentication.*/PasswordAuthentication yes/g' sshd_config
 sed -i 's/PasswordAuthentication no/PasswordAuthentication yes/g' sshd_config
 grep -q "Port 3303" sshd_config || echo -e "Port 3303" >>sshd_config
+if ! grep -q "# AUTOSCRIPT-TUNNEL-HARDENING" sshd_config; then
+  cat >>sshd_config <<'EOF'
+
+# AUTOSCRIPT-TUNNEL-HARDENING
+Match User *,!root
+    X11Forwarding no
+    AllowAgentForwarding no
+    PermitTunnel no
+    GatewayPorts no
+EOF
+fi
 cd
 systemctl daemon-reload
 systemctl restart sshd
@@ -332,24 +343,20 @@ firewall-cmd --permanent --zone=public --set-target=default >/dev/null 2>&1
 firewall-cmd --permanent --zone=public --remove-port=1-65535/tcp >/dev/null 2>&1
 firewall-cmd --permanent --zone=public --remove-port=1-65535/udp >/dev/null 2>&1
 
-# --- Allowlist: only the ports the stack actually uses ---
-# SSH management
-firewall-cmd --permanent --zone=public --add-port=22/tcp >/dev/null 2>&1   # OpenSSH
-firewall-cmd --permanent --zone=public --add-port=3303/tcp >/dev/null 2>&1 # OpenSSH (alt)
-firewall-cmd --permanent --zone=public --add-port=109/tcp >/dev/null 2>&1  # Dropbear
-# Web / proxy entrypoints (HAProxy -> Nginx -> Xray)
-firewall-cmd --permanent --zone=public --add-port=80/tcp >/dev/null 2>&1  # HTTP
-firewall-cmd --permanent --zone=public --add-port=443/tcp >/dev/null 2>&1 # HTTPS/TLS
-# BadVPN UDPGW
-firewall-cmd --permanent --zone=public --add-port=7300/udp >/dev/null 2>&1
-# OpenVPN
-firewall-cmd --permanent --zone=public --add-port=1194/tcp >/dev/null 2>&1 # OpenVPN TCP
-# NoobzVPN Direct TCP
-firewall-cmd --permanent --zone=public --add-port=8585/tcp >/dev/null 2>&1 # NoobzVPN TCP
+# --- Allowlist: all VPN / WebSocket / SSL / API / UDPGW / OpenVPN ports ---
+for p in 22 3303 109 143 80 8080 8880 2052 2082 2086 2095 443 8443 2053 2083 2087 2096 8888 1194 3128 8000 8585; do
+  firewall-cmd --permanent --zone=public --add-port="${p}/tcp" >/dev/null 2>&1
+done
+for p in 53 5300 443 8443 1194 2200 7100 7200 7300; do
+  firewall-cmd --permanent --zone=public --add-port="${p}/udp" >/dev/null 2>&1
+done
+firewall-cmd --permanent --zone=trusted --add-interface=lo >/dev/null 2>&1 || true
+firewall-cmd --permanent --zone=public --add-masquerade >/dev/null 2>&1 || true
 
 firewall-cmd --reload >/dev/null 2>&1
-print_success "Firewall locked down (allowlist only)."
-print_info "Internal services (Xray API 10085, WebAPI 9000, nginx 81) remain bound to 127.0.0.1."
+[[ -x /usr/local/sbin/fix-firewall ]] && /usr/local/sbin/fix-firewall --quiet >/dev/null 2>&1 || true
+print_success "Firewall & SELinux policies configured (strict allowlist)."
+print_info "Internal services (Xray API 10085, WebAPI 9000, nginx 81/82) remain bound to 127.0.0.1."
 
 # Enterprise Sysctl Tuning (RAM/CPU aware)
 print_info "Applying network tuning for ${TIER} tier (${RAM_MB} MB RAM, ${CPU_CORES} CPU)..."
@@ -377,27 +384,43 @@ echo -e "${LIGHT}Step 2: Server Identification${NC}"
 echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
 while true; do
   read -p "Input Domain Name: " domain
-  if [[ -n "$domain" ]]; then break; else print_error "Domain cannot be empty."; fi
+  domain=$(echo "$domain" | tr -d '[:space:]' | tr '[:upper:]' '[:lower:]')
+  if [[ -z "$domain" ]]; then
+    print_error "Domain cannot be empty."
+  elif [[ ! "$domain" =~ ^[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$ ]]; then
+    print_error "Invalid domain format (example: vpn.example.com)."
+  else
+    break
+  fi
 done
 echo -e "$domain" >/etc/xray/domain
 print_success "Domain set to: $domain"
 sleep 1
 
-# Install Dropbear 2019 on EL9
+# Install Dropbear on EL9 (strict TLSv1.2+ certificate verification)
 dropbear_install_logic() {
-  print_info "Compiling Dropbear 2019.78 for Rocky Linux 9..."
+  print_info "Compiling Dropbear 2022.82 for Rocky Linux 9..."
   dnf groupinstall "Development Tools" -y >/dev/null 2>&1
-  dnf install zlib-devel wget bzip2 -y >/dev/null 2>&1
-  cd /usr/local/src
-  wget -q --no-check-certificate https://matt.ucc.asn.au/dropbear/releases/dropbear-2019.78.tar.bz2 ||
-    wget -q --no-check-certificate https://dropbear.nl/mirror/releases/dropbear-2019.78.tar.bz2
-  tar xjf dropbear-2019.78.tar.bz2 >/dev/null 2>&1
-  cd dropbear-2019.78
+  dnf install zlib-devel curl bzip2 -y >/dev/null 2>&1
+  local db_ver="2022.82"
+  local db_tmp
+  db_tmp=$(mktemp -d /tmp/dropbear-src.XXXXXX)
+  chmod 700 "$db_tmp"
+  cd "$db_tmp"
+  curl -fsSL --proto '=https' --tlsv1.2 -o "dropbear-${db_ver}.tar.bz2" "https://matt.ucc.asn.au/dropbear/releases/dropbear-${db_ver}.tar.bz2" || \
+    curl -fsSL --proto '=https' --tlsv1.2 -o "dropbear-${db_ver}.tar.bz2" "https://dropbear.nl/mirror/releases/dropbear-${db_ver}.tar.bz2"
+  if ! bzip2 -t "dropbear-${db_ver}.tar.bz2" 2>/dev/null; then
+    print_error "Dropbear source archive verification failed."
+    cd /root && rm -rf "$db_tmp"
+    return 1
+  fi
+  tar xjf "dropbear-${db_ver}.tar.bz2" >/dev/null 2>&1
+  cd "dropbear-${db_ver}"
   ./configure --prefix=/usr --sysconfdir=/etc/dropbear >/dev/null 2>&1
-  make -j$(nproc) >/dev/null 2>&1
+  make -j"$(nproc)" >/dev/null 2>&1
   make install >/dev/null 2>&1
-  cd ..
-  rm -fr dropbear*
+  cd /root
+  rm -rf "$db_tmp"
 
   cat >/etc/systemd/system/dropbear.service <<'EOF'
 [Unit]
@@ -406,9 +429,10 @@ After=network.target rsyslog.service
 
 [Service]
 Type=simple
+KillMode=process
 # No -E: log via syslog (authpriv) so logins reach /var/log/secure.
-# -F keeps it in the foreground for systemd Type=simple.
-ExecStart=/usr/sbin/dropbear -F -p 109 -b /etc/issue.net -r /etc/dropbear/dropbear_rsa_host_key -W 65536
+# -F keeps it in the foreground for systemd Type=simple; -w blocks root login on Dropbear.
+ExecStart=/usr/sbin/dropbear -F -w -p 109 -p 143 -b /etc/issue.net -r /etc/dropbear/dropbear_rsa_host_key -W 65536
 Restart=always
 
 [Install]
@@ -963,6 +987,7 @@ xray_install_logic() {
           "0.0.0.0/8",
           "10.0.0.0/8",
           "100.64.0.0/10",
+          "127.0.0.0/8",
           "169.254.0.0/16",
           "172.16.0.0/12",
           "192.0.0.0/24",
@@ -981,7 +1006,42 @@ xray_install_logic() {
 }
 EOF
 
-  bash -c "$(curl -L https://github.com/XTLS/Xray-install/raw/main/install-release.sh)" @ install -u nobody --version 25.10.15 >/dev/null 2>&1
+  # Direct TLS-verified download + SHA-256 verification of Xray-core (zero curl|bash)
+  local xray_ver="v25.10.15"
+  local xray_arch="64"
+  case "$(uname -m)" in
+    x86_64|amd64)   xray_arch="64" ;;
+    aarch64|arm64)  xray_arch="arm64-v8a" ;;
+    armv7l|armv7*)  xray_arch="arm32-v7a" ;;
+  esac
+  local xray_zip="Xray-linux-${xray_arch}.zip"
+  local xray_base="https://github.com/XTLS/Xray-core/releases/download/${xray_ver}"
+  local xray_tmp
+  xray_tmp=$(mktemp -d /tmp/xray-install.XXXXXX)
+  chmod 700 "$xray_tmp"
+  dnf install -y unzip >/dev/null 2>&1 || true
+  if curl -fsSL --proto '=https' --tlsv1.2 -o "${xray_tmp}/${xray_zip}" "${xray_base}/${xray_zip}" && \
+     curl -fsSL --proto '=https' --tlsv1.2 -o "${xray_tmp}/${xray_zip}.dgst" "${xray_base}/${xray_zip}.dgst"; then
+    local exp_sha256 act_sha256
+    exp_sha256=$(awk -F'= ' '/^SHA2-256=/ {print $2; exit}' "${xray_tmp}/${xray_zip}.dgst" | tr -d '[:space:]')
+    act_sha256=$(sha256sum "${xray_tmp}/${xray_zip}" | awk '{print $1}')
+    if [[ -n "$exp_sha256" && "$exp_sha256" != "$act_sha256" ]]; then
+      print_error "Xray SHA-256 verification failed! Expected ${exp_sha256}, got ${act_sha256}."
+      rm -rf "$xray_tmp"
+      exit 1
+    fi
+    mkdir -p /usr/local/bin /usr/local/share/xray
+    unzip -oq "${xray_tmp}/${xray_zip}" -d "$xray_tmp/extracted"
+    install -m 0755 "$xray_tmp/extracted/xray" /usr/local/bin/xray
+    [[ -f "$xray_tmp/extracted/geoip.dat" ]] && install -m 0644 "$xray_tmp/extracted/geoip.dat" /usr/local/share/xray/geoip.dat
+    [[ -f "$xray_tmp/extracted/geosite.dat" ]] && install -m 0644 "$xray_tmp/extracted/geosite.dat" /usr/local/share/xray/geosite.dat
+    print_success "Xray-core ${xray_ver} SHA-256 verified and installed."
+  else
+    print_error "Failed to download Xray-core ${xray_ver} from official GitHub release."
+    rm -rf "$xray_tmp"
+    exit 1
+  fi
+  rm -rf "$xray_tmp"
 
   mkdir -p /var/log/xray
   touch /var/log/xray/{access,error}.log
@@ -1051,13 +1111,22 @@ fi
 # connections to the Xray/ssh-ws/dropbear upstreams. Without this, on an
 # Enforcing system nginx fails with "connect() ... (13: Permission denied)"
 # when proxying to 127.0.0.1:1/2/3.
-print_info "Configuring SELinux booleans for the proxy stack..."
+print_info "Configuring SELinux booleans and port labels for the proxy stack..."
 if command -v getenforce >/dev/null 2>&1 && [[ "$(getenforce 2>/dev/null)" != "Disabled" ]]; then
-  dnf install -y policycoreutils >/dev/null 2>&1 || true
-  setsebool -P httpd_can_network_connect 1 2>/dev/null
-  setsebool -P httpd_can_network_connect_db 1 2>/dev/null
-  setsebool -P httpd_can_network_relay 1 2>/dev/null
-  print_success "SELinux booleans applied (httpd network connect enabled)."
+  dnf install -y policycoreutils policycoreutils-python-utils >/dev/null 2>&1 || true
+  setsebool -P httpd_can_network_connect 1 2>/dev/null || true
+  setsebool -P httpd_can_network_connect_db 1 2>/dev/null || true
+  setsebool -P httpd_can_network_relay 1 2>/dev/null || true
+  setsebool -P httpd_setrlimit 1 2>/dev/null || true
+  setsebool -P haproxy_connect_any 1 2>/dev/null || true
+  setsebool -P nis_enabled 1 2>/dev/null || true
+  if command -v semanage >/dev/null 2>&1; then
+    for sp in 81 82 8080 8443 8888 8585 9000; do
+      semanage port -a -t http_port_t -p tcp "$sp" 2>/dev/null || \
+        semanage port -m -t http_port_t -p tcp "$sp" 2>/dev/null || true
+    done
+  fi
+  print_success "SELinux booleans and http_port_t labels applied."
 else
   print_info "SELinux disabled or not present; skipping booleans."
 fi
@@ -1174,6 +1243,11 @@ upstream vmess_xhttp {
 upstream noobz_ws {
     server 127.0.0.1:8585;
     keepalive 32;
+}
+
+upstream api_backend {
+    server 127.0.0.1:9000;
+    keepalive 256;
 }
 
 # Proper Connection header for WebSocket upgrades.
@@ -1359,12 +1433,17 @@ server {
         autoindex on;
     }
 
-    # REST API Daemon (api-server).
+    # REST API Daemon (api-server) with persistent keepalive pool.
     location /api/ {
-        proxy_pass http://127.0.0.1:9000;
+        proxy_pass http://api_backend;
+        proxy_http_version 1.1;
+        proxy_set_header Connection "";
         proxy_set_header Host \$host;
         proxy_set_header X-Real-IP \$remote_addr;
         proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+        proxy_read_timeout 60s;
+        proxy_send_timeout 60s;
+        client_max_body_size 8m;
     }
 
     # VMESS multipath (any other path) OR SSH-WS, decided by the handshake.
@@ -1506,8 +1585,28 @@ server {
         proxy_send_timeout 7d;
         proxy_buffering off;
     }
+
+    # OpenVPN client config downloads over HTTP/2 (:443 ALPN h2).
+    location /risqinf/ {
+        alias /var/www/html/risqinf/;
+        autoindex on;
+    }
+
+    # REST API Daemon over HTTP/2 (:443 ALPN h2).
+    location /api/ {
+        proxy_pass http://api_backend;
+        proxy_http_version 1.1;
+        proxy_set_header Connection "";
+        proxy_set_header Host \$host;
+        proxy_set_header X-Real-IP \$remote_addr;
+        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+        proxy_read_timeout 60s;
+        proxy_send_timeout 60s;
+        client_max_body_size 8m;
+    }
 }
 EOF
+  [[ -x /usr/local/sbin/fix-firewall ]] && /usr/local/sbin/fix-firewall --quiet >/dev/null 2>&1 || true
   systemctl daemon-reload
   systemctl enable nginx --now >/dev/null 2>&1
   check_service nginx
@@ -1528,8 +1627,7 @@ haproxy_install_logic() {
   print_info "Configuring HAProxy Enterprise Balancing..."
   dnf install haproxy -y >/dev/null 2>&1
 
-  # Generate combined certificate for HAProxy
-  mkdir -p /etc/haproxy
+  mkdir -p /etc/haproxy /run/haproxy
   cat /etc/xray/xray.crt /etc/xray/xray.key | tee /etc/haproxy/haproxy.pem >/dev/null
   chmod 600 /etc/haproxy/haproxy.pem
 
@@ -1540,6 +1638,7 @@ global
     user haproxy
     group haproxy
     daemon
+    stats socket /run/haproxy/admin.sock mode 600 level admin
     tune.ssl.default-dh-param 2048
 
 defaults
@@ -1550,24 +1649,24 @@ defaults
     timeout client 30m
     timeout server 30m
 
-# Plain HTTP on :80 -> nginx (WS/HU/XHTTP over HTTP, ACME, downloads).
+# Plain HTTP on :80 and :8080 -> nginx (WS/HU/XHTTP over HTTP, ACME, downloads, API).
 frontend http_in
     bind *:80
+    bind *:8080
     mode tcp
     default_backend nginx_http
 
-# TLS on :443 with ALPN (h2,http/1.1).
+# TLS on :443 and :8443 with ALPN (h2,http/1.1).
 # HAProxy terminates TLS, then splits traffic:
-#   * ALPN h2 (gRPC)              -> nginx HTTP/2 backend (:82)
+#   * ALPN h2 (gRPC/API)          -> nginx HTTP/2 backend (:82)
 #   * starts with HTTP method     -> nginx HTTP/1.1 backend (:81)
-#   * anything else (raw SSH)     -> Dropbear directly (:109)
+#   * anything else (raw SSH)     -> Dropbear directly (:109) (Direct SSH SSL/TLS)
 frontend tls_in
     bind *:443 ssl crt /etc/haproxy/haproxy.pem alpn h2,http/1.1
+    bind *:8443 ssl crt /etc/haproxy/haproxy.pem alpn h2,http/1.1
     mode tcp
     tcp-request inspect-delay 5s
-    # Detect HTTP/2 ALPN
     acl is_h2 ssl_fc_alpn -i h2
-    # Detect an HTTP request line in the decrypted payload.
     acl is_http req.payload(0,10) -m reg -i ^(GET|POST|HEAD|PUT|OPTIONS|DELETE|PATCH|TRACE|CONNECT)
     tcp-request content accept if { req.len gt 0 }
     use_backend nginx_h2 if is_h2
@@ -1702,11 +1801,42 @@ EOF
 systemctl daemon-reload
 systemctl enable --now autoexpire.timer limit-ip-ssh.timer backup.timer fixlog.timer
 
-# Install Package Lain
-curl -s https://packagecloud.io/install/repositories/ookla/speedtest-cli/script.rpm.sh | sudo bash
-sudo dnf install speedtest -y
+# Install Speedtest CLI securely (direct HTTPS archive, zero curl|bash repo script)
+install_speedtest_secure() {
+  local st_arch="x86_64"
+  case "$(uname -m)" in
+    x86_64|amd64)        st_arch="x86_64" ;;
+    aarch64|arm64)       st_arch="aarch64" ;;
+    armv7l|armv7*)       st_arch="armhf" ;;
+  esac
+  local st_tmp
+  st_tmp=$(mktemp -d /tmp/speedtest.XXXXXX)
+  if curl -fsSL --proto '=https' --tlsv1.2 -m 30 -o "${st_tmp}/st.tgz" \
+       "https://install.speedtest.net/app/cli/ookla-speedtest-1.2.0-linux-${st_arch}.tgz" 2>/dev/null; then
+    tar -xzf "${st_tmp}/st.tgz" -C "$st_tmp" 2>/dev/null && \
+      [[ -f "${st_tmp}/speedtest" ]] && install -m 0755 "${st_tmp}/speedtest" /usr/local/bin/speedtest
+  fi
+  rm -rf "$st_tmp"
+}
+install_speedtest_secure
 
-# Setup Limit IP & Quota Services
+# Setup Limit IP & Quota Services (SSH All-Protocol + Xray)
+cat >/etc/systemd/system/quota-ssh.service <<EOF
+[Unit]
+Description=SSH All-Protocol Usage Quota Enforcement
+After=network.target dropbear.service sshd.service
+
+[Service]
+Type=simple
+ExecStart=/usr/local/sbin/loop-quota-ssh
+Restart=always
+RestartSec=5
+User=root
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
 cat >/etc/systemd/system/quota.service <<EOF
 [Unit]
 Description=Vless Quota Looping
@@ -1804,10 +1934,10 @@ WantedBy=multi-user.target
 EOF
 
 systemctl daemon-reload
-systemctl enable quota limit-ip-vless --now
+systemctl enable quota-ssh quota limit-ip-vless --now
 systemctl enable quota-trojan limit-ip-trojan --now
 systemctl enable quota-vmess limit-ip-vmess --now
-for svc in quota limit-ip-vless quota-trojan limit-ip-trojan quota-vmess limit-ip-vmess; do
+for svc in quota-ssh quota limit-ip-vless quota-trojan limit-ip-trojan quota-vmess limit-ip-vmess; do
   check_service "$svc" || print_warn "Looping service '$svc' not active (will retry via Restart=on-failure)."
 done
 
@@ -2021,7 +2151,8 @@ verify-client-cert none
 username-as-common-name
 persist-key
 persist-tun
-status openvpn-status-tcp.log
+status /etc/openvpn/server/openvpn-status-tcp.log 5
+status-version 2
 verb 3
 EOF
 
@@ -2077,49 +2208,42 @@ else
   ovpn_install_logic
 fi
 
-# ---- Install & Configure Squid Proxy (Port 3128) ----
+# ---- Install & Configure Squid Proxy (Port 3128 - Hardened Destination ACL) ----
 squid_install_logic() {
-  echo -e "\e[32m[INFO]\e[0m Installing & Configuring Squid Proxy (Port 3128)..."
+  echo -e "\e[32m[INFO]\e[0m Installing & Hardening Squid Proxy (Port 3128)..."
   dnf install squid -y >/dev/null 2>&1
 
-  cat >/etc/squid/squid.conf <<'EOF'
-acl localnet src 0.0.0.1-0.255.255.255
-acl localnet src 10.0.0.0/8
-acl localnet src 100.64.0.0/10
-acl localnet src 169.254.0.0/16
-acl localnet src 172.16.0.0/12
-acl localnet src 192.168.0.0/16
-acl localnet src fc00::/7
-acl localnet src fe80::/10
+  local vps_ip
+  vps_ip=$(curl -fsSL --max-time 4 https://checkip.amazonaws.com 2>/dev/null | tr -d '[:space:]')
+  [[ -z "$vps_ip" ]] && vps_ip=$(hostname -I 2>/dev/null | awk '{print $1}')
 
-acl SSL_ports port 443
-acl Safe_ports port 80
-acl Safe_ports port 21
-acl Safe_ports port 443
-acl Safe_ports port 70
-acl Safe_ports port 210
-acl Safe_ports port 1025-65535
-acl Safe_ports port 280
-acl Safe_ports port 488
-acl Safe_ports port 591
-acl Safe_ports port 777
-acl Safe_ports port 1194
+  cat >/etc/squid/squid.conf <<EOF
+acl SSL_ports port 443 8443 22 109 143 3303 1194 8585
+acl Safe_ports port 80 8080 8880 8888 443 8443 22 109 143 3303 1194 8585
+acl CONNECT method CONNECT
+acl to_vps_ip dst ${vps_ip:-127.0.0.1}/32
+acl to_vps_dom dstdomain ${domain}
 
 http_access deny !Safe_ports
 http_access deny CONNECT !SSL_ports
-http_access allow localhost manager
 http_access deny manager
-http_access allow localhost
 http_access deny to_localhost
 http_access deny to_linklocal
-http_access allow all
+http_access allow to_vps_ip
+http_access allow to_vps_dom
+http_access allow localhost
+http_access deny all
 
 http_port 3128
+cache deny all
+cache_mem 0 MB
+logfile_rotate 0
+access_log none
+cache_store_log none
+via off
+forwarded_for delete
+httpd_suppress_version_string on
 coredump_dir /var/spool/squid
-
-refresh_pattern ^ftp:		1440	20%	10080
-refresh_pattern -i (/cgi-bin/|\?) 0	0%	0
-refresh_pattern .		0	20%	4320
 EOF
 
   systemctl enable squid >/dev/null 2>&1
@@ -2241,6 +2365,10 @@ EOF
 }
 
 noobz_install_logic
+
+# Apply final Rocky Linux 9 extreme optimization + SELinux/Firewall verification
+[[ -x /usr/local/sbin/optimize-rocky ]] && /usr/local/sbin/optimize-rocky --quiet >/dev/null 2>&1 || true
+[[ -x /usr/local/sbin/fix-firewall ]] && /usr/local/sbin/fix-firewall --quiet >/dev/null 2>&1 || true
 
 clear
 # Notification

@@ -53,8 +53,8 @@ cert() {
     clear
 
     ~/.acme.sh/acme.sh --set-default-ca --server letsencrypt
-    ~/.acme.sh/acme.sh --issue -d $domain --standalone -k ec-256
-    ~/.acme.sh/acme.sh --installcert -d $domain \
+    ~/.acme.sh/acme.sh --issue -d "$domain" --standalone -k ec-256
+    ~/.acme.sh/acme.sh --installcert -d "$domain" \
         --fullchainpath /etc/xray/xray.crt \
         --keypath /etc/xray/xray.key \
         --ecc
@@ -95,18 +95,24 @@ addhost() {
     echo -e " ${GREEN}$(cat /etc/xray/domain)${NC}"
     echo ""
     read -rp " New Domain/Host: " -e host
+    host=$(echo "$host" | tr -d '[:space:]' | tr '[:upper:]' '[:lower:]')
     echo ""
     if [ -z "$host" ]; then
         warn "No change made."
         ui_rule
         read -n 1 -s -r -p " Press any key to return..."
         menu
+    elif ! valid_domain "$host"; then
+        err "Invalid domain format."
+        ui_rule
+        read -n 1 -s -r -p " Press any key to return..."
+        menu
     else
-        cat /etc/xray/domain > /etc/xray/domain.bak
+        old=$(cat /etc/xray/domain 2>/dev/null | tr -d '\r\n')
         echo "$host" > /etc/xray/domain
-        old=$(cat /etc/xray/domain.bak)
-        sed -i "s|server_name ${old};|server_name ${host};|" /etc/nginx/risqinf.conf
-        rm -f /etc/xray/domain.bak
+        if [[ -n "$old" && -f /etc/nginx/risqinf.conf ]]; then
+            sed -i "s|server_name ${old};|server_name ${host};|g" /etc/nginx/risqinf.conf
+        fi
         ui_rule
         read -n 1 -s -r -p " Press any key to renew cert..."
         cert

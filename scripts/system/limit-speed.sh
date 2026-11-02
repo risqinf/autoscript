@@ -563,19 +563,15 @@ install_speedtest_cli() {
         *)                sys_bit="x86_64" ;;
     esac
 
-    local url1 url2
+    local url1
     url1="https://install.speedtest.net/app/cli/ookla-speedtest-1.2.0-linux-${sys_bit}.tgz"
-    url2="https://dl.lamp.sh/files/ookla-speedtest-1.2.0-linux-${sys_bit}.tgz"
 
     mkdir -p "${SPEEDTEST_DIR}"
+    chmod 700 "${SPEEDTEST_DIR}" 2>/dev/null
 
-    if ! wget --no-check-certificate -q -T15 -O "${SPEEDTEST_DIR}/speedtest.tgz" "${url1}" 2>/dev/null; then
-        if ! wget --no-check-certificate -q -T15 -O "${SPEEDTEST_DIR}/speedtest.tgz" "${url2}" 2>/dev/null; then
-            if ! curl -sL -m 15 -o "${SPEEDTEST_DIR}/speedtest.tgz" "${url1}" 2>/dev/null; then
-                err "Gagal download speedtest CLI"
-                return 1
-            fi
-        fi
+    if ! curl -fsSL --proto '=https' --tlsv1.2 -m 20 -o "${SPEEDTEST_DIR}/speedtest.tgz" "${url1}" 2>/dev/null; then
+        err "Gagal download speedtest CLI (official HTTPS)"
+        return 1
     fi
 
     tar zxf "${SPEEDTEST_DIR}/speedtest.tgz" -C "${SPEEDTEST_DIR}" 2>/dev/null

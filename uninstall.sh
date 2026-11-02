@@ -33,7 +33,8 @@ fi
 echo "[1/9] Stopping and disabling services..."
 SERVICES=(
     haproxy xray nginx dropbear ssh-ws server api-server squid slowdns noobzvpns
-    quota limit-ip-vless quota-trojan limit-ip-trojan quota-vmess limit-ip-vmess
+    quota-ssh quota limit-ip-vless quota-trojan limit-ip-trojan quota-vmess limit-ip-vmess
+    zram-autoscript dnsmasq-autoscript
     autoexpire.timer limit-ip-ssh.timer backup.timer fixlog.timer
     openvpn-server@server-tcp-1194
 )
@@ -45,18 +46,25 @@ done
 # ---------------------------------------------------------------------------
 echo "[2/9] Removing systemd unit files..."
 rm -f /etc/systemd/system/xray.service
+rm -rf /etc/systemd/system/xray.service.d
 rm -f /etc/systemd/system/ssh-ws.service
+rm -rf /etc/systemd/system/ssh-ws.service.d
 rm -f /etc/systemd/system/server.service
 rm -f /etc/systemd/system/api-server.service
+rm -rf /etc/systemd/system/api-server.service.d
 rm -f /etc/systemd/system/dropbear.service
 rm -f /etc/systemd/system/slowdns.service
 rm -f /etc/systemd/system/noobzvpns.service
+rm -f /etc/systemd/system/quota-ssh.service
 rm -f /etc/systemd/system/quota.service
 rm -f /etc/systemd/system/quota-trojan.service
 rm -f /etc/systemd/system/quota-vmess.service
 rm -f /etc/systemd/system/limit-ip-vless.service
 rm -f /etc/systemd/system/limit-ip-trojan.service
 rm -f /etc/systemd/system/limit-ip-vmess.service
+rm -f /etc/systemd/system/zram-autoscript.service
+rm -f /etc/systemd/system/dnsmasq-autoscript.service
+rm -f /etc/sysctl.d/99-autoscript-extreme.conf
 # Scheduled-maintenance timers + their oneshot services (replaced cron).
 rm -f /etc/systemd/system/autoexpire.timer   /etc/systemd/system/autoexpire.service
 rm -f /etc/systemd/system/limit-ip-ssh.timer /etc/systemd/system/limit-ip-ssh.service
@@ -94,10 +102,10 @@ for cmd in menu menu-ssh menu-vless menu-vmess menu-trojan menu-host menu-backup
     list-ssh list-vless list-vmess list-trojan list-noobz \
     limit-ip-ssh limit-ip-vless limit-ip-vmess limit-ip-trojan \
     loop-ip-vless loop-ip-vmess loop-ip-trojan \
-    loop-quota-vless loop-quota-vmess loop-quota-trojan \
-    quota-vless quota-vmess quota-trojan \
+    loop-quota-ssh loop-quota-vless loop-quota-vmess loop-quota-trojan \
+    quota-ssh quota-vless quota-vmess quota-trojan \
     xp-ssh xp-vless xp-vmess xp-trojan xp-noobz \
-    install-api uninstall-api slowdns menu-rdns rdns-manager \
+    install-api uninstall-api slowdns menu-rdns rdns-manager fix-firewall optimize-rocky zram-autoscript \
     backup restore fixlog limit-speed bw-monitor versi-xray stream-check change-domain change-dns change-timezone change-banner status set-telegram uninstall; do
     rm -f "/usr/local/sbin/$cmd"
 done

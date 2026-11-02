@@ -1,16 +1,23 @@
 package handler
 
 import (
+	"context"
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 
-	"github.com/valyala/fasthttp"
 	"github.com/risqinf/autoscript-api/internal/model"
+	"github.com/valyala/fasthttp"
 )
+
+// opContext creates a bounded standard Go context decoupled from fasthttp's pooled RequestCtx.
+func opContext() (context.Context, context.CancelFunc) {
+	return context.WithTimeout(context.Background(), 30*time.Second)
+}
 
 // writeJSON writes a JSON response.
 func writeJSON(ctx *fasthttp.RequestCtx, statusCode int, v interface{}) {
@@ -45,76 +52,42 @@ func writeValidationError(ctx *fasthttp.RequestCtx, message string, details []mo
 	writeJSON(ctx, fasthttp.StatusBadRequest, model.NewValidationError(message, details))
 }
 
-// handleServiceError maps service errors to HTTP responses.
+// handleServiceError maps service errors to structured HTTP responses without leaking internal stack details.
 func handleServiceError(ctx *fasthttp.RequestCtx, err error) {
 	switch {
 	case errors.Is(err, model.ErrAccountNotFound):
 		writeError(ctx, fasthttp.StatusNotFound, model.ErrNotFound, "Account not found")
 	case errors.Is(err, model.ErrAccountExists):
-		writeError(ctx, fasthttp.StatusConflict, model.ErrConflict, "Account already exists")
+		writeError(ctx, fasthttp.StatusConflict, model.ErrConflict, err.Error())
 	case errors.Is(err, model.ErrSecretInUse):
 		writeError(ctx, fasthttp.StatusConflict, model.ErrConflict, "Secret already in use")
 	case errors.Is(err, model.ErrInvalidProtocol):
-		writeError(ctx, fasthttp.StatusBadRequest, model.ErrValidation, "Invalid protocol")
+		writeError(ctx, fasthttp.StatusBadRequest, model.ErrValidation, "Invalid protocol (must be ssh, vless, vmess, trojan, or noobz)")
+	case errors.Is(err, model.ErrInvalidService):
+		writeError(ctx, fasthttp.StatusBadRequest, model.ErrValidation, "Invalid or disallowed service/action")
 	case errors.Is(err, model.ErrXrayTestFailed):
 		writeError(ctx, fasthttp.StatusInternalServerError, model.ErrInternal, "Xray config validation failed")
 	default:
-		// Log unexpected errors
 		writeError(ctx, fasthttp.StatusInternalServerError, model.ErrInternal, "Internal server error")
 	}
 }
 
-// parseDurationToDays converts a duration string to days.
-func parseDurationToDays(duration string) int {
-	if len(duration) < 2 {
-		return 0
+// getUserValue safely extracts a route parameter string from ctx.UserValue.
+func getUserValue(ctx *fasthttp.RequestCtx, key string) string {
+	v, ok := ctx.UserValue(key).(string)
+	if !ok {
+		return ""
 	}
-
-	unit := duration[len(duration)-1]
-	value := duration[:len(duration)-1]
-
-	// Parse numeric value
-	var num int
-	for _, c := range value {
-		if c < '0' || c > '9' {
-			return 0
-		}
-		num = num*10 + int(c-'0')
-	}
-
-	if num <= 0 {
-		return 0
-	}
-
-	// Convert to days based on unit
-	switch unit {
-	case 'm':
-		// Minutes: minimum 1 day
-		if num < 1440 { // less than 24 hours
-			return 1
-		}
-		return num / 1440
-	case 'h':
-		// Hours: minimum 1 day
-		if num < 24 {
-			return 1
-		}
-		return num / 24
-	case 'd':
-		// Days
-		return num
-	default:
-		return 0
-	}
+	return v
 }
 
-// sanitizeFilename sanitizes a string for use in filenames.
+// sanitizeFilename sanitizes a string for safe Content-Disposition headers.
 func sanitizeFilename(s string) string {
-	// Remove path separators and other dangerous characters
 	replacer := strings.NewReplacer(
 		"/", "_",
 		"\\", "_",
 		"..", "_",
+		"\"", "",
 		"\r", "",
 		"\n", "",
 		"\t", "",
@@ -122,17 +95,16 @@ func sanitizeFilename(s string) string {
 	return replacer.Replace(s)
 }
 
-// generateRandomString generates a random hex string of the given length.
+// generateRandomString generates a CSPRNG hex string of the given length.
 func generateRandomString(length int) string {
 	bytes := make([]byte, (length+1)/2)
 	if _, err := rand.Read(bytes); err != nil {
-		// Fallback to a simple string if CSPRNG fails
-		return fmt.Sprintf("fallback%d", length)
+		return fmt.Sprintf("rnd%d", length)
 	}
 	return hex.EncodeToString(bytes)[:length]
 }
 
-// TrimPrefix is a helper to trim a prefix from a string.
+// TrimPrefix trims a prefix from a string.
 func TrimPrefix(s, prefix string) string {
 	return strings.TrimPrefix(s, prefix)
 }

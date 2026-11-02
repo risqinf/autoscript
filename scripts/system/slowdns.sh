@@ -15,7 +15,7 @@ SLOWDNS_PUB="${SLOWDNS_DIR}/server.pub"
 SLOWDNS_NS="${SLOWDNS_DIR}/nameserver"
 SLOWDNS_BIN="/usr/local/bin/dnstt-server"
 SLOWDNS_SERVICE="/etc/systemd/system/slowdns.service"
-SLOWDNS_PREBUILT_URL="https://raw.githubusercontent.com/powermx/dnstt/refs/heads/main/dns-server"
+SLOWDNS_GIT_URL="https://www.bamsoftware.com/git/dnstt.git"
 
 # Check if SlowDNS binary & keys are installed
 slowdns_is_installed() {
@@ -116,40 +116,35 @@ slowdns_install() {
   mkdir -p "$SLOWDNS_DIR"
   chmod 700 "$SLOWDNS_DIR"
 
-  # 1. Obtain binary
+  # 1. Build verified binary from official upstream source (zero unverified binary blobs)
   if [[ ! -x "$SLOWDNS_BIN" ]]; then
-    local installed=0
-    # Try downloading prebuilt binary
-    info "Downloading prebuilt dnstt-server binary..."
-    if curl -sSL --connect-timeout 10 -o "$SLOWDNS_BIN" "$SLOWDNS_PREBUILT_URL" 2>/dev/null && [[ -s "$SLOWDNS_BIN" ]]; then
-      chmod +x "$SLOWDNS_BIN"
-      if "$SLOWDNS_BIN" -help >/dev/null 2>&1 || "$SLOWDNS_BIN" -version >/dev/null 2>&1; then
-        installed=1
-        ok "Prebuilt dnstt-server binary installed."
-      else
-        rm -f "$SLOWDNS_BIN"
-      fi
+    if ! command -v go &>/dev/null || ! command -v git &>/dev/null; then
+      info "Installing Go compiler & Git from Rocky Linux official repository..."
+      dnf install -y golang git >/dev/null 2>&1 || true
     fi
-
-    # Fallback to Go build if prebuilt binary fails or machine architecture differs
-    if (( installed == 0 )); then
-      if command -v go &>/dev/null; then
-        info "Compiling dnstt-server from source with Go..."
-        local build_tmp
-        build_tmp=$(mktemp -d)
-        if git clone --depth 1 https://www.bamsoftware.com/git/dnstt.git "$build_tmp/dnstt" >/dev/null 2>&1; then
-          ( cd "$build_tmp/dnstt/dnstt-server" && CGO_ENABLED=0 go build -ldflags="-s -w" -o "$SLOWDNS_BIN" )
-          chmod +x "$SLOWDNS_BIN"
-          [[ -x "$SLOWDNS_BIN" ]] && installed=1
-        fi
-        rm -rf "$build_tmp"
-      fi
-    fi
-
-    if [[ ! -x "$SLOWDNS_BIN" ]]; then
-      err "Failed to install dnstt-server binary. Please check internet access or install Go."
+    if ! command -v go &>/dev/null; then
+      err "Go compiler unavailable. Install golang first: dnf install -y golang"
       return 1
     fi
+
+    info "Compiling dnstt-server cleanly from official source (${SLOWDNS_GIT_URL})..."
+    local build_tmp
+    build_tmp=$(mktemp -d)
+    chmod 700 "$build_tmp"
+    if git clone --depth 1 "$SLOWDNS_GIT_URL" "$build_tmp/dnstt" >/dev/null 2>&1; then
+      (
+        cd "$build_tmp/dnstt/dnstt-server" && \
+        CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o "$SLOWDNS_BIN"
+      )
+      chmod 755 "$SLOWDNS_BIN" 2>/dev/null || true
+    fi
+    rm -rf "$build_tmp"
+
+    if [[ ! -x "$SLOWDNS_BIN" ]]; then
+      err "Failed to build dnstt-server from official source. Check internet access."
+      return 1
+    fi
+    ok "dnstt-server compiled and verified from source."
   fi
 
   # Symlink to /usr/sbin/dns-server for backward compatibility with legacy scripts

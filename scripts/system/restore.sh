@@ -50,9 +50,10 @@ case "$METHOD" in
       exit 1
     fi
 
-    backup_file="/tmp/tg_restore.zip"
+    backup_file=$(mktemp /tmp/tg_restore.XXXXXX.zip)
+    chmod 600 "$backup_file" 2>/dev/null
     info "Downloading backup archive from Telegram..."
-    curl -sSL -o "$backup_file" "https://api.telegram.org/file/bot${botToken}/${file_path}"
+    curl -sSL --max-time 120 -o "$backup_file" "https://api.telegram.org/file/bot${botToken}/${file_path}"
     ;;
 
   3|cloudvault|cloud-vault|CloudVault)
@@ -64,8 +65,9 @@ case "$METHOD" in
     read -rp "Enter Cloud Vault Restore Code: " cv_code
     [[ -z "$cv_code" ]] && { err "Restore code cannot be empty."; exit 1; }
 
-    backup_file="/tmp/cv_restore.zip"
-    download_cloudvault_archive "$cv_url" "$cv_code" "$backup_file" || exit 1
+    backup_file=$(mktemp /tmp/cv_restore.XXXXXX.zip)
+    chmod 600 "$backup_file" 2>/dev/null
+    download_cloudvault_archive "$cv_url" "$cv_code" "$backup_file" || { rm -f "$backup_file"; exit 1; }
     ;;
 
   2|zip|manual|Zip|*)
@@ -113,8 +115,15 @@ if [[ -z "$PASSWORD" ]] || ! unzip -t -P "$PASSWORD" "$backup_file" &>/dev/null;
   fi
 fi
 
-work="/root/.restore_work"
-rm -rf "$work"; mkdir -p "$work"
+# Anti-ZipSlip check: reject archives containing '..' or absolute paths
+if unzip -Z1 "$backup_file" 2>/dev/null | grep -qE '(^/|\.\./)'; then
+  err "Security violation: archive contains unsafe path traversal entries."
+  [[ "$backup_file" == /tmp/*.zip ]] && rm -f "$backup_file"
+  exit 1
+fi
+
+work=$(mktemp -d /root/.restore_work.XXXXXX)
+chmod 700 "$work"
 unzip -o -P "$PASSWORD" "$backup_file" -d "$work" >/dev/null 2>&1
 
 info "Restoring configuration and database..."
@@ -146,10 +155,11 @@ if [[ -d "$work/etc/api" ]]; then
   chmod 600 /etc/api/* 2>/dev/null || true
   ok "API tokens and configuration restored"
 fi
-[[ -f "$work/passwd" ]]              && cp -f "$work/passwd" /etc/
-[[ -f "$work/shadow" ]]              && cp -f "$work/shadow" /etc/
-[[ -f "$work/group" ]]               && cp -f "$work/group" /etc/
-[[ -f "$work/gshadow" ]]             && cp -f "$work/gshadow" /etc/
+[[ -f "$work/passwd" ]]              && { cp -f "$work/passwd" /etc/passwd; chown root:root /etc/passwd; chmod 644 /etc/passwd; }
+[[ -f "$work/shadow" ]]              && { cp -f "$work/shadow" /etc/shadow; chown root:root /etc/shadow; chmod 000 /etc/shadow; }
+[[ -f "$work/group" ]]               && { cp -f "$work/group" /etc/group; chown root:root /etc/group; chmod 644 /etc/group; }
+[[ -f "$work/gshadow" ]]             && { cp -f "$work/gshadow" /etc/gshadow; chown root:root /etc/gshadow; chmod 000 /etc/gshadow; }
+command -v restorecon &>/dev/null && restorecon -F /etc/passwd /etc/shadow /etc/group /etc/gshadow 2>/dev/null || true
 
 printf '%s' "$PASSWORD" > "$pass_file"; chmod 600 "$pass_file"
 

@@ -14,10 +14,11 @@ import (
 	"github.com/rs/zerolog"
 )
 
-// XrayService defines the interface for xray operations.
+// XrayService defines the interface for connection config link generation and Xray daemon control.
 type XrayService interface {
 	GetConfigLink(ctx context.Context, protocol, username, secret, domain string) (*model.ConfigLink, error)
 	GetOpenVPNConfig(ctx context.Context, username string) (string, error)
+	GetServerPorts() model.PortInfo
 	RestartXray(ctx context.Context) error
 }
 
@@ -35,12 +36,38 @@ func NewXrayService(cfg *config.Config, logger *zerolog.Logger) XrayService {
 	}
 }
 
-// GetConfigLink generates a configuration link for the given protocol.
+// GetServerPorts returns the complete multi-protocol port matrix configured on Rocky Linux 9.
+func (s *xrayService) GetServerPorts() model.PortInfo {
+	return model.PortInfo{
+		OpenSSH:    "22, 3303",
+		Dropbear:   "109, 143",
+		SSHSSL:     "443, 8443",
+		SSH:        "22, 3303, 109, 143",
+		WSHTTP:     "80, 8080, 8880, 2052, 2082, 2086, 2095, 8888",
+		WSTLS:      "443, 8443, 2053, 2083, 2087, 2096",
+		BadVPN:     "7100, 7200, 7300",
+		OpenVPNTCP: "1194",
+		OpenVPNUDP: "2200",
+		SquidProxy: "3128, 8000",
+		SlowDNS:    "53, 5300 (UDP)",
+		HUHTTP:     "80, 8080",
+		HUTLS:      "443, 8443",
+		XHTTPHTTP:  "80, 8080",
+		XHTTPTLS:   "443, 8443",
+		GRPCTLS:    "443, 8443",
+		NoobzTCP:   "8585",
+		NoobzWS:    "80, 8080 (HTTP), 443, 8443 (TLS)",
+	}
+}
+
+// GetConfigLink generates all connection links, payloads, and port details for the given protocol.
 func (s *xrayService) GetConfigLink(ctx context.Context, protocol, username, secret, domain string) (*model.ConfigLink, error) {
 	if domain == "" || domain == "localhost" {
 		d := s.config.Domain()
 		if d != "" && d != "not set" {
 			domain = d
+		} else {
+			domain = "127.0.0.1"
 		}
 	}
 
@@ -60,7 +87,6 @@ func (s *xrayService) GetConfigLink(ctx context.Context, protocol, username, sec
 	}
 }
 
-// getVLESSLink generates VLESS links and all supported transports.
 func (s *xrayService) getVLESSLink(username, secret, domain string) *model.ConfigLink {
 	wsTLS := fmt.Sprintf("vless://%s@%s:443?path=/vless&security=tls&encryption=none&type=ws&host=%s&sni=%s#%s-WS-TLS",
 		secret, domain, domain, domain, username)
@@ -77,11 +103,13 @@ func (s *xrayService) getVLESSLink(username, secret, domain string) *model.Confi
 	grpcTLS := fmt.Sprintf("vless://%s@%s:443?serviceName=vless-grpc&security=tls&encryption=none&type=grpc&sni=%s#%s-gRPC",
 		secret, domain, domain, username)
 
+	ports := s.GetServerPorts()
 	return &model.ConfigLink{
 		Protocol: "vless",
 		Username: username,
 		Link:     wsTLS,
 		Remark:   wsNTLS,
+		Ports:    &ports,
 		Transports: map[string]string{
 			"ws_tls":     wsTLS,
 			"ws_ntls":    wsNTLS,
@@ -94,9 +122,8 @@ func (s *xrayService) getVLESSLink(username, secret, domain string) *model.Confi
 	}
 }
 
-// getVMESSLink generates VMESS links and all supported transports.
 func (s *xrayService) getVMESSLink(username, secret, domain string) *model.ConfigLink {
-	buildVMESS := func(port, tls, net, path, suffix string) string {
+	buildVMESS := func(port, tls, netType, path, suffix string) string {
 		cfg := map[string]interface{}{
 			"v":    "2",
 			"ps":   username + suffix,
@@ -104,7 +131,7 @@ func (s *xrayService) getVMESSLink(username, secret, domain string) *model.Confi
 			"port": port,
 			"id":   secret,
 			"aid":  "0",
-			"net":  net,
+			"net":  netType,
 			"path": path,
 			"type": "none",
 			"host": domain,
@@ -125,11 +152,13 @@ func (s *xrayService) getVMESSLink(username, secret, domain string) *model.Confi
 	xhttpNTLS := buildVMESS("80", "none", "xhttp", "/vmess-xhttp", "-XHTTP-NTLS")
 	grpcTLS := buildVMESS("443", "tls", "grpc", "vmess-grpc", "-gRPC")
 
+	ports := s.GetServerPorts()
 	return &model.ConfigLink{
 		Protocol: "vmess",
 		Username: username,
 		Link:     wsTLS,
 		Remark:   wsNTLS,
+		Ports:    &ports,
 		Transports: map[string]string{
 			"ws_tls":     wsTLS,
 			"ws_ntls":    wsNTLS,
@@ -142,7 +171,6 @@ func (s *xrayService) getVMESSLink(username, secret, domain string) *model.Confi
 	}
 }
 
-// getTrojanLink generates Trojan links and all supported transports.
 func (s *xrayService) getTrojanLink(username, secret, domain string) *model.ConfigLink {
 	wsTLS := fmt.Sprintf("trojan://%s@%s:443?type=ws&security=tls&host=%s&path=/trojan&sni=%s#%s-WS-TLS",
 		secret, domain, domain, domain, username)
@@ -153,11 +181,13 @@ func (s *xrayService) getTrojanLink(username, secret, domain string) *model.Conf
 	grpcTLS := fmt.Sprintf("trojan://%s@%s:443?type=grpc&security=tls&serviceName=trojan-grpc&sni=%s#%s-gRPC",
 		secret, domain, domain, username)
 
+	ports := s.GetServerPorts()
 	return &model.ConfigLink{
 		Protocol: "trojan",
 		Username: username,
 		Link:     wsTLS,
 		Remark:   huTLS,
+		Ports:    &ports,
 		Transports: map[string]string{
 			"ws_tls":    wsTLS,
 			"hu_tls":    huTLS,
@@ -167,13 +197,19 @@ func (s *xrayService) getTrojanLink(username, secret, domain string) *model.Conf
 	}
 }
 
-// getSSHLink generates SSH connection info and payloads.
 func (s *xrayService) getSSHLink(username, password, domain string) *model.ConfigLink {
-	config := fmt.Sprintf("%s:1-65535@%s:%s", domain, username, password)
+	configStr := fmt.Sprintf("%s:1-65535@%s:%s", domain, username, password)
 
 	transports := map[string]string{
-		"payload_tls":  fmt.Sprintf("GET / HTTP/1.1[crlf]Host: %s[crlf]Upgrade: websocket[crlf][crlf]", domain),
-		"payload_http": fmt.Sprintf("GET / HTTP/1.1[crlf]Host: %s[crlf]Upgrade: websocket[crlf][crlf]", domain),
+		"openssh_direct":  fmt.Sprintf("%s:22 / %s:3303", domain, domain),
+		"dropbear_direct": fmt.Sprintf("%s:109 / %s:143", domain, domain),
+		"ssh_ssl_tls":     fmt.Sprintf("%s:443 / %s:8443 (SNI: %s)", domain, domain, domain),
+		"ssh_ws_http":     fmt.Sprintf("%s:80 / %s:8080 / %s:8888", domain, domain, domain),
+		"ssh_ws_tls":      fmt.Sprintf("%s:443 / %s:8443", domain, domain),
+		"openvpn_tcp_url": fmt.Sprintf("https://%s/risqinf/openvpn/tcp.ovpn", domain),
+		"openvpn_udp_url": fmt.Sprintf("https://%s/risqinf/openvpn/udp.ovpn", domain),
+		"payload_tls":     fmt.Sprintf("GET / HTTP/1.1[crlf]Host: %s[crlf]Upgrade: websocket[crlf][crlf]", domain),
+		"payload_http":    fmt.Sprintf("GET / HTTP/1.1[crlf]Host: %s[crlf]Upgrade: websocket[crlf][crlf]", domain),
 	}
 
 	if nsBytes, err := os.ReadFile("/etc/slowdns/nameserver"); err == nil {
@@ -188,43 +224,47 @@ func (s *xrayService) getSSHLink(username, password, domain string) *model.Confi
 		}
 	}
 
+	ports := s.GetServerPorts()
 	return &model.ConfigLink{
 		Protocol:   "ssh",
 		Username:   username,
-		Link:       config,
-		Remark:     "HTTP Custom config",
+		Link:       configStr,
+		Remark:     "SSH All-Protocol (OpenSSH, Dropbear, SSL/TLS, WS, SlowDNS, OpenVPN)",
+		Ports:      &ports,
 		Transports: transports,
 	}
 }
 
-// getNoobzLink generates NoobzVPN connection info and payload.
 func (s *xrayService) getNoobzLink(username, password, domain string) *model.ConfigLink {
-	config := fmt.Sprintf("%s:8585@%s:%s", domain, username, password)
-
-	transports := map[string]string{
-		"tcp_port":   "8585",
-		"ws_port":    "80, 8080 (HTTP), 443 (HTTPS)",
-		"identifier": "risqinf",
-		"payload":    fmt.Sprintf("GET /noobz HTTP/1.1[crlf]Host: %s[crlf]Upgrade: websocket[crlf][crlf]", domain),
-	}
-
+	configStr := fmt.Sprintf("%s:8585@%s:%s", domain, username, password)
+	ports := s.GetServerPorts()
 	return &model.ConfigLink{
-		Protocol:   "noobz",
-		Username:   username,
-		Link:       config,
-		Remark:     "NoobzVPN Payload & Identifier",
-		Transports: transports,
+		Protocol: "noobz",
+		Username: username,
+		Link:     configStr,
+		Remark:   "NoobzVPN Payload & Identifier",
+		Ports:    &ports,
+		Transports: map[string]string{
+			"tcp_port":   "8585",
+			"ws_port":    "80, 8080 (HTTP), 443, 8443 (HTTPS)",
+			"identifier": "risqinf",
+			"payload":    fmt.Sprintf("GET /noobz HTTP/1.1[crlf]Host: %s[crlf]Upgrade: websocket[crlf][crlf]", domain),
+		},
 	}
 }
 
 // GetOpenVPNConfig returns the OpenVPN TCP config file content.
 func (s *xrayService) GetOpenVPNConfig(ctx context.Context, username string) (string, error) {
-	configPath := "/var/www/html/risqinf/openvpn/tcp.ovpn"
-	data, err := os.ReadFile(configPath)
-	if err != nil {
-		return "", fmt.Errorf("read ovpn config: %w", err)
+	paths := []string{
+		"/var/www/html/risqinf/openvpn/tcp.ovpn",
+		"/etc/openvpn/tcp.ovpn",
 	}
-	return string(data), nil
+	for _, p := range paths {
+		if data, err := os.ReadFile(p); err == nil {
+			return string(data), nil
+		}
+	}
+	return "", fmt.Errorf("ovpn profile not found on server")
 }
 
 // RestartXray restarts the xray service.

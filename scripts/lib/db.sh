@@ -39,6 +39,8 @@ db_init() {
   chmod 700 "$AS_ETC" 2>/dev/null
   db_exec "
 PRAGMA journal_mode=WAL;
+PRAGMA synchronous=NORMAL;
+PRAGMA temp_store=MEMORY;
 PRAGMA foreign_keys=ON;
 
 CREATE TABLE IF NOT EXISTS meta (
@@ -66,6 +68,17 @@ CREATE TABLE IF NOT EXISTS accounts (
 CREATE INDEX IF NOT EXISTS idx_accounts_proto_status ON accounts(protocol,status);
 CREATE INDEX IF NOT EXISTS idx_accounts_expired ON accounts(expired_at);
 
+CREATE TABLE IF NOT EXISTS ssh_proto_usage (
+  username     TEXT NOT NULL,
+  sub_protocol TEXT NOT NULL CHECK (sub_protocol IN ('openssh','dropbear','ssh_ssl','ssh_ws','slowdns','openvpn')),
+  rx_bytes     INTEGER NOT NULL DEFAULT 0,
+  tx_bytes     INTEGER NOT NULL DEFAULT 0,
+  updated_at   INTEGER NOT NULL DEFAULT (strftime('%s','now')),
+  PRIMARY KEY (username, sub_protocol)
+);
+
+CREATE INDEX IF NOT EXISTS idx_ssh_proto_user ON ssh_proto_usage(username);
+
 CREATE TABLE IF NOT EXISTS audit_log (
   id        INTEGER PRIMARY KEY AUTOINCREMENT,
   ts        INTEGER NOT NULL DEFAULT (strftime('%s','now')),
@@ -76,7 +89,7 @@ CREATE TABLE IF NOT EXISTS audit_log (
   detail    TEXT NOT NULL DEFAULT ''
 );
 
-INSERT OR IGNORE INTO meta(key,value) VALUES ('schema_version','1');
+INSERT OR IGNORE INTO meta(key,value) VALUES ('schema_version','2');
 " >/dev/null 2>&1
 
   # Auto-migrate: ensure 'noobz' is permitted in protocol CHECK constraint for existing databases
@@ -177,4 +190,30 @@ db_set_expired() {
              updated_at=strftime('%s','now')
            WHERE protocol='$(sql_escape "$proto")'
              AND username='$(sql_escape "$user")';"
+}
+
+db_reset_quota() {
+  local proto="$1" user="$2"
+  db_exec "UPDATE accounts SET used_bytes=0, updated_at=strftime('%s','now')
+           WHERE protocol='$(sql_escape "$proto")'
+             AND username='$(sql_escape "$user")';"
+  if [[ "$proto" == "ssh" ]]; then
+    db_exec "DELETE FROM ssh_proto_usage WHERE username='$(sql_escape "$user")';"
+  fi
+}
+
+db_get_ssh_proto_usage() {
+  local user="${1:-}"
+  if [[ -n "$user" ]]; then
+    db_query "SELECT sub_protocol, rx_bytes, tx_bytes, (rx_bytes + tx_bytes)
+              FROM ssh_proto_usage
+              WHERE username='$(sql_escape "$user")'
+              ORDER BY sub_protocol;"
+  else
+    db_query "SELECT sub_protocol, COALESCE(SUM(rx_bytes),0), COALESCE(SUM(tx_bytes),0),
+                     COALESCE(SUM(rx_bytes + tx_bytes),0)
+              FROM ssh_proto_usage
+              GROUP BY sub_protocol
+              ORDER BY sub_protocol;"
+  fi
 }

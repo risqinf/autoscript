@@ -31,7 +31,7 @@ jobs:
         continue-on-error: true
 
   go-audit:
-    name: Go REST API Server Audit
+    name: Go REST API Server Audit & Race Tests
     runs-on: ubuntu-latest
     steps:
       - name: Checkout Code
@@ -40,12 +40,11 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
-          go-version: '1.22'
+          go-version-file: 'files/go.mod'
 
-      - name: Run Go Vet & Build Check
+      - name: Run Go Vet, Race Tests & Build Check
         run: |
-          if [ -d "files" ]; then
-            cd files
-            go vet ./...
-            go build -v ./...
-          fi
+          cd files
+          go vet ./...
+          go test -race -v ./...
+          CGO_ENABLED=0 go build -trimpath -ldflags="-s -w -X main.Version=v5.5.0" -v ./cmd/server/main.go

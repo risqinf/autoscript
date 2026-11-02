@@ -58,25 +58,32 @@ rm -f $DROPBEAR_BIN $DROPBEAR_LIB/* $DROPBEAR_CONFIG/* $DROPBEAR_MAN
 clear
 
 # Install dependensi
-dnf groupinstall "Development Tools" -y && dnf install zlib-devel wget bzip2 -y
+dnf groupinstall "Development Tools" -y && dnf install zlib-devel curl bzip2 -y
 clear
 
-# Download Dropbear
-echo -e "${BIGreen}Mengunduh Dropbear versi $DROPBEAR_VERSION...${BIWhite}"
-wget --no-check-certificate -O dropbear.tar.bz2 "$DROPBEAR_URL/dropbear-$DROPBEAR_VERSION.tar.bz2" || \
-wget --no-check-certificate -O dropbear.tar.bz2 "https://dropbear.nl/mirror/releases/dropbear-$DROPBEAR_VERSION.tar.bz2"
+BUILD_DIR=$(mktemp -d /tmp/dropbear-build.XXXXXX)
+chmod 700 "$BUILD_DIR"
+cd "$BUILD_DIR" || exit 1
 
-# Periksa apakah file berhasil diunduh
-if [ ! -f "dropbear.tar.bz2" ]; then
-    echo -e "${BIRed}Download gagal, periksa URL atau koneksi internet.${BIWhite}"
+# Download Dropbear with strict HTTPS/TLS verification
+echo -e "${BIGreen}Mengunduh Dropbear versi $DROPBEAR_VERSION (TLS Verified)...${BIWhite}"
+curl -fsSL --proto '=https' --tlsv1.2 --max-time 60 -o dropbear.tar.bz2 "$DROPBEAR_URL/dropbear-$DROPBEAR_VERSION.tar.bz2" || \
+curl -fsSL --proto '=https' --tlsv1.2 --max-time 60 -o dropbear.tar.bz2 "https://dropbear.nl/mirror/releases/dropbear-$DROPBEAR_VERSION.tar.bz2"
+
+# Periksa apakah file berhasil diunduh & valid bzip2 archive
+if [[ ! -s "dropbear.tar.bz2" ]] || ! bzip2 -t dropbear.tar.bz2 2>/dev/null; then
+    rm -rf "$BUILD_DIR"
+    [[ -f /usr/sbin/dropbear.bak ]] && cp -f /usr/sbin/dropbear.bak "$DROPBEAR_BIN"
+    echo -e "${BIRed}Download atau verifikasi arsip gagal, periksa koneksi internet.${BIWhite}"
     echo -e "${BIWhite}Press any key to menu${NC}"
     read -n 1 -s -r
     menu
+    exit 1
 fi
 
 # Ekstrak file
 tar -xjf dropbear.tar.bz2
-cd "dropbear-$DROPBEAR_VERSION" || exit
+cd "dropbear-$DROPBEAR_VERSION" || { rm -rf "$BUILD_DIR"; exit 1; }
 
 clear
 if ./configure --prefix=/usr && make && make install; then
@@ -127,8 +134,8 @@ else
 fi
 
 clear
-cd ..
-rm -rf dropbear.tar.bz2 "dropbear-$DROPBEAR_VERSION"
+cd /root || cd /
+rm -rf "$BUILD_DIR"
 
 # Pesan akhir
 ui_rule

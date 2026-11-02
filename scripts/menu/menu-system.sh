@@ -22,7 +22,9 @@ menu_system() {
     ui_opt 10 "Telegram Setup"
     ui_opt 11 "Limit Speed (Bandwidth Shaper)"
     ui_opt 12 "Bandwidth Monitor (vnstat)"
-    ui_opt 13 "Uninstall Script"
+    ui_opt 13 "Fix Firewall & Nginx SELinux Ports"
+    ui_opt 14 "Extreme Rocky Linux 9 Optimizer (1CPU/1GB+)"
+    ui_opt 15 "Uninstall Script"
     ui_rule
     ui_opt 0 "Back to Main Menu"
     ui_foot
@@ -42,6 +44,7 @@ menu_system() {
             echo ""
             info "Restarting all core services..."
             systemctl restart haproxy nginx xray sshd dropbear ssh-ws 2>/dev/null
+            svc_active quota-ssh && systemctl restart quota-ssh 2>/dev/null || true
             svc_active openvpn-server@server-tcp-1194 && systemctl restart openvpn-server@server-tcp-1194 2>/dev/null || true
             svc_active squid && systemctl restart squid 2>/dev/null || true
             svc_active noobzvpns && systemctl restart noobzvpns 2>/dev/null || true
@@ -55,7 +58,9 @@ menu_system() {
         10) clear ; set-telegram ;;
         11) clear ; limit-speed ; ui_back ; menu_system ;;
         12) clear ; bw-monitor ; ui_back ; menu_system ;;
-        13) clear ; uninstall ;;
+        13) clear ; fix-firewall ; ui_back ; menu_system ;;
+        14) clear ; optimize-rocky ; ui_back ; menu_system ;;
+        15) clear ; uninstall ;;
         0|x|X) clear ; menu ;;
         *) err "Invalid option."; sleep 1; menu_system ;;
     esac

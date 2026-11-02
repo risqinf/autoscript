@@ -3,123 +3,139 @@ package main
 import (
 	"context"
 	"database/sql"
+	"flag"
 	"fmt"
 	"os"
 	"os/signal"
 	"syscall"
 	"time"
 
+	"github.com/risqinf/autoscript-api/internal/cache"
 	"github.com/risqinf/autoscript-api/internal/config"
 	"github.com/risqinf/autoscript-api/internal/handler"
 	"github.com/risqinf/autoscript-api/internal/middleware"
 	"github.com/risqinf/autoscript-api/internal/repository"
 	"github.com/risqinf/autoscript-api/internal/router"
+	"github.com/risqinf/autoscript-api/internal/security"
 	"github.com/risqinf/autoscript-api/internal/service"
 	"github.com/risqinf/autoscript-api/internal/validator"
 	"github.com/rs/zerolog"
 	_ "modernc.org/sqlite"
 )
 
-func main() {
-	// Logger
-	logger := zerolog.New(os.Stdout).With().Timestamp().Logger()
+// Version is injected at build time via -ldflags "-X main.Version=v5.5.0".
+var Version = "v5.5.0"
 
-	// Config
+func main() {
+	showVersion := flag.Bool("version", false, "Print version and exit")
+	flag.Parse()
+	if *showVersion {
+		fmt.Printf("autoscript-api %s\n", Version)
+		return
+	}
+
+	logger := zerolog.New(os.Stdout).With().Timestamp().Str("version", Version).Logger()
+
 	cfg, err := config.Load()
 	if err != nil {
 		logger.Fatal().Err(err).Msg("failed to load config")
 	}
 
-	// Ensure API database directory exists
-	apiDBDir := "/etc/api"
-	if err := os.MkdirAll(apiDBDir, 0700); err != nil {
-		logger.Fatal().Err(err).Msg("failed to create API database directory")
-	}
-
-	// Open API database
+	// Open API database (single writer pool; hot path uses atomic memory cache)
 	apiDB, err := sql.Open("sqlite", cfg.APIDatabasePath)
 	if err != nil {
 		logger.Fatal().Err(err).Msg("failed to open API database")
 	}
 	defer apiDB.Close()
 
-	// Configure API database
 	apiDB.SetMaxOpenConns(1)
 	apiDB.SetMaxIdleConns(1)
 	apiDB.SetConnMaxLifetime(0)
 
-	// Initialize API schema
 	apiRepoImpl := repository.NewAPIRepositoryImpl(apiDB)
 	if err := apiRepoImpl.InitSchema(); err != nil {
 		logger.Fatal().Err(err).Msg("failed to initialize API schema")
 	}
 	apiRepo := apiRepoImpl
 
-	// Open main database
-	mainDB, err := sql.Open("sqlite", cfg.MainDatabasePath)
+	// Ensure Bearer token in /etc/api/key and api.db are synchronized
+	activeToken, err := apiRepo.SyncKeyFile(context.Background(), cfg.APIKeyFile)
 	if err != nil {
-		logger.Fatal().Err(err).Msg("failed to open main database")
+		logger.Warn().Err(err).Msg("failed to synchronize default API token")
+	} else if activeToken != "" {
+		logger.Info().Msg("API Bearer token & SHA-256 HMAC secret initialized")
 	}
-	defer mainDB.Close()
 
-	// Configure main database
-	mainDB.SetMaxOpenConns(1)
-	mainDB.SetMaxIdleConns(1)
-	mainDB.SetConnMaxLifetime(0)
+	// Open Main VPN database with separated WAL Writer (1 conn) + Concurrent Readers (N conns)
+	mainWriteDB, err := sql.Open("sqlite", cfg.MainDatabasePath)
+	if err != nil {
+		logger.Fatal().Err(err).Msg("failed to open main write database")
+	}
+	defer mainWriteDB.Close()
+	mainWriteDB.SetMaxOpenConns(1)
+	mainWriteDB.SetMaxIdleConns(1)
+	mainWriteDB.SetConnMaxLifetime(0)
 
-	// Validator
+	mainReadDB, err := sql.Open("sqlite", cfg.MainDatabasePath)
+	if err != nil {
+		logger.Fatal().Err(err).Msg("failed to open main read database")
+	}
+	defer mainReadDB.Close()
+	readConns := cfg.ReadPoolSize()
+	mainReadDB.SetMaxOpenConns(readConns)
+	mainReadDB.SetMaxIdleConns(readConns)
+	mainReadDB.SetConnMaxLifetime(0)
+	_, _ = mainReadDB.Exec(`PRAGMA journal_mode=WAL; PRAGMA query_only=ON; PRAGMA busy_timeout=8000; PRAGMA temp_store=MEMORY;`)
+
+	accountRepo := repository.NewAccountRepositoryWithPools(mainReadDB, mainWriteDB)
+	if err := accountRepo.InitSchema(); err != nil {
+		logger.Fatal().Err(err).Msg("failed to initialize main account schema")
+	}
+
+	// Shared Singleflight Snapshot Cache
+	snapCache := cache.NewSnapshotCache()
 	val := validator.New()
 
-	// Repositories
-	accountRepo := repository.NewAccountRepository(mainDB)
-
 	// Services
-	accountSvc := service.NewAccountService(accountRepo, apiRepo, cfg, &logger)
 	xraySvc := service.NewXrayService(cfg, &logger)
-	monitorSvc := service.NewMonitorService(accountRepo, cfg, &logger)
+	accountSvc := service.NewAccountServiceFull(accountRepo, apiRepo, xraySvc, snapCache, cfg, &logger)
+	monitorSvc := service.NewMonitorServiceWithCache(accountRepo, cfg, snapCache, &logger)
 
 	// Handlers
-	accountHdlr := handler.NewAccountHandler(accountSvc, xraySvc, val, &logger)
+	accountHdlr := handler.NewAccountHandlerWithConfig(accountSvc, xraySvc, val, cfg, &logger)
 	monitorHdlr := handler.NewMonitorHandler(monitorSvc, &logger)
-	systemHdlr := handler.NewSystemHandler(monitorSvc, &logger)
+	systemHdlr := handler.NewSystemHandlerFull(monitorSvc, accountSvc, xraySvc, val, &logger)
 
-	// Middleware
-	authMw := middleware.NewAuthMiddleware(apiRepo, &logger)
-	loggerMw := middleware.NewLoggerMiddleware(&logger)
-	rateLimitMw := middleware.NewRateLimiter(apiRepo, cfg.RateLimit, cfg.RateLimitWindow, &logger)
+	// Multi-Layer SHA-256 Security & High-Throughput Middleware
+	verifier := security.NewVerifier(apiRepo, cfg)
+	defer verifier.Close()
 
-	// Router
-	r := router.New(authMw, loggerMw, rateLimitMw)
+	authMw := middleware.NewAuthMiddlewareWithVerifier(verifier, &logger)
+	loggerMw := middleware.NewLoggerMiddlewareWithRepo(apiRepo, &logger)
+	defer loggerMw.Close()
+	rateLimitMw := middleware.NewHighThroughputRateLimiter(cfg.RateLimit, cfg.AuthBurstLimit, cfg.RateLimitWindow, &logger)
+	defer rateLimitMw.Close()
+
+	// Router & Server
+	r := router.NewWithConfig(authMw, loggerMw, rateLimitMw, cfg)
 	r.RegisterAccountRoutes(accountHdlr)
 	r.RegisterMonitorRoutes(monitorHdlr)
 	r.RegisterSystemRoutes(systemHdlr)
 
-	// Server
 	srv := r.Server(cfg.ListenAddress)
 
-	// Start server
 	go func() {
-		logger.Info().Str("addr", cfg.ListenAddress).Msg("starting API server")
+		logger.Info().
+			Str("addr", cfg.ListenAddress).
+			Str("security_mode", cfg.SecurityMode).
+			Int("max_concurrency", cfg.MaxConcurrency).
+			Int("read_pool", readConns).
+			Msg("starting Autoscript Enterprise API Server")
 		if err := srv.ListenAndServe(cfg.ListenAddress); err != nil {
 			logger.Fatal().Err(err).Msg("server failed to start")
 		}
 	}()
 
-	// Generate default token if none exists
-	tokens, err := apiRepo.ListTokens(context.Background())
-	if err != nil {
-		logger.Warn().Err(err).Msg("failed to check tokens")
-	} else if len(tokens) == 0 {
-		token, err := apiRepo.CreateToken(context.Background(), "default")
-		if err != nil {
-			logger.Warn().Err(err).Msg("failed to create default token")
-		} else {
-			logger.Info().Str("token", token).Msg("default API token created")
-			fmt.Printf("\n=== DEFAULT API TOKEN ===\n%s\n========================\n\n", token)
-		}
-	}
-
-	// Graceful shutdown
 	quit := make(chan os.Signal, 1)
 	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
 	<-quit

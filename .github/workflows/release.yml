@@ -7,7 +7,7 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: 'Tag to release (e.g. v1.0.0)'
+        description: 'Tag to release (e.g. v5.5.0)'
         required: true
         type: string
       prerelease:
@@ -29,7 +29,6 @@ on:
 
 env:
   APP_NAME: autoscript-api
-  GO_VERSION: '1.22'
 
 permissions:
   contents: write
@@ -85,12 +84,14 @@ jobs:
           PREV=$(git tag --sort=-version:refname | grep -v "^${TAG}$" | head -1 || true)
 
           {
-            echo "## Autoscript Release ${TAG}"
+            echo "## Autoscript Enterprise Release ${TAG}"
             echo ""
-            echo "### What is Included"
-            echo "- Autoscript VPN Core (Xray, SSH-WS, Dropbear, HAProxy, Nginx, SQLite)"
-            echo "- RESTful API Server Binary (\`autoscript-api\` / \`api-server\` for Linux amd64, arm64, armv7)"
-            echo "- Live Session & Quota Tracking (1:1 SSH and Xray stats)"
+            echo "### Highlights"
+            echo "- **5-Layer Strict SHA-256 + Canonical HMAC-SHA256 API Verification** + Mutual Response Signatures"
+            echo "- **SSH All-Protocol Quota & Live Session Engine** (OpenSSH, Dropbear, Direct SSH SSL/TLS, SSH-WS, SlowDNS, OpenVPN)"
+            echo "- **Real-Time Accessed Apps/Domains, Transport Protocol, ISP & GeoIP Telemetry**"
+            echo "- **Flash-Sale Bulk Engine on Standard Endpoints** (\`POST /api/accounts/{protocol}\`: 1 up to 1,000 accounts in 1 request with single-pass Xray JSON + WAL batch + Idempotency)"
+            echo "- **Extreme Rocky Linux 9 Optimization** (1 vCPU / 1 GB RAM ready, ZRAM, BBR, SELinux & Firewalld auto-healing)"
             echo ""
             echo "### Commits & Changes"
             if [[ -n "$PREV" ]]; then
@@ -98,7 +99,7 @@ jobs:
               echo ""
               git log --pretty=format:"* %s ([%h](https://github.com/${{ github.repository }}/commit/%H))" "${PREV}..HEAD" || true
             else
-              echo "Initial release changes:"
+              echo "Release changes:"
               echo ""
               git log --pretty=format:"* %s ([%h](https://github.com/${{ github.repository }}/commit/%H))" -n 25 || true
             fi
@@ -106,19 +107,19 @@ jobs:
             echo "---"
             echo "### Installation & Update"
             echo "\`\`\`bash"
-            echo "# Run Installer"
-            echo "curl -fsSL https://raw.githubusercontent.com/${{ github.repository }}/main/install.sh | bash"
+            echo "# Run Full Installer (Rocky Linux 9)"
+            echo "curl -fsSL --proto '=https' --tlsv1.2 https://raw.githubusercontent.com/${{ github.repository }}/main/install.sh | bash"
             echo ""
-            echo "# API Installation (auto-downloads latest binary)"
-            echo "curl -fsSL https://raw.githubusercontent.com/${{ github.repository }}/main/install-api.sh | bash"
+            echo "# Standalone API Server Installer / Updater (auto-verifies SHA-256)"
+            echo "curl -fsSL --proto '=https' --tlsv1.2 https://raw.githubusercontent.com/${{ github.repository }}/main/install-api.sh | bash"
             echo "\`\`\`"
             echo ""
-            echo "### Latest Release Binary"
-            echo "| Platform | File |"
-            echo "|----------|------|"
-            echo "| Linux amd64 | \`${{ env.APP_NAME }}-${TAG}-linux-amd64.tar.gz\` |"
-            echo "| Linux arm64 | \`${{ env.APP_NAME }}-${TAG}-linux-arm64.tar.gz\` |"
-            echo "| Linux armv7 | \`${{ env.APP_NAME }}-${TAG}-linux-armv7.tar.gz\` |"
+            echo "### Prebuilt Release Binaries"
+            echo "| Platform | Archive | Checksum |"
+            echo "|----------|---------|----------|"
+            echo "| Linux amd64 | \`${{ env.APP_NAME }}-${TAG}-linux-amd64.tar.gz\` | \`${{ env.APP_NAME }}-${TAG}-linux-amd64.sha256\` |"
+            echo "| Linux arm64 | \`${{ env.APP_NAME }}-${TAG}-linux-arm64.tar.gz\` | \`${{ env.APP_NAME }}-${TAG}-linux-arm64.sha256\` |"
+            echo "| Linux armv7 | \`${{ env.APP_NAME }}-${TAG}-linux-armv7.tar.gz\` | \`${{ env.APP_NAME }}-${TAG}-linux-armv7.sha256\` |"
           } > release-body.md
 
           mkdir -p release-meta
@@ -159,8 +160,7 @@ jobs:
 
       - uses: actions/setup-go@v5
         with:
-          go-version: ${{ env.GO_VERSION }}
-          cache: false
+          go-version-file: 'files/go.mod'
 
       - name: Build Binary
         id: build
@@ -170,16 +170,12 @@ jobs:
           GOARCH:      ${{ matrix.goarch }}
           GOARM:       ${{ matrix.goarm }}
           TAG:         ${{ needs.prepare.outputs.tag }}
-          VER:         ${{ needs.prepare.outputs.version }}
         run: |
           cd files
-          go mod tidy
-
           OUT="${{ env.APP_NAME }}-${TAG}-${{ matrix.label }}"
           mkdir -p ../dist
 
           LDFLAGS="-s -w -X main.Version=${TAG}"
-
           go build \
             -trimpath \
             -ldflags "${LDFLAGS}" \
@@ -198,7 +194,7 @@ jobs:
 
           ARCH="${OUT}.tar.gz"
           tar -czf "${ARCH}" "${OUT}" "${OUT}.sha256"
-          
+
           echo "archive=${ARCH}" >> "$GITHUB_OUTPUT"
           ls -lh "${ARCH}"
 
@@ -249,6 +245,7 @@ jobs:
             gh release edit "${TAG}" --notes-file release-assets/release-body.md $FLAGS || true
             gh release upload "${TAG}" \
               release-assets/*.tar.gz \
+              release-assets/*.sha256 \
               release-assets/checksums.txt \
               --clobber
           else
@@ -257,6 +254,7 @@ jobs:
               --notes-file release-assets/release-body.md \
               $FLAGS \
               release-assets/*.tar.gz \
+              release-assets/*.sha256 \
               release-assets/checksums.txt
           fi
 
@@ -267,12 +265,10 @@ jobs:
     name: Update VERSION
     needs: [prepare, release]
     runs-on: ubuntu-latest
-    # Only update VERSION for non-draft, non-prerelease (stable releases)
     if: ${{ needs.prepare.outputs.is_prerelease == 'false' && github.event.inputs.draft != 'true' }}
     steps:
       - uses: actions/checkout@v4
         with:
-          # Use a PAT or the default token; fetch main branch
           token: ${{ secrets.GITHUB_TOKEN }}
           ref: main
           fetch-depth: 1
