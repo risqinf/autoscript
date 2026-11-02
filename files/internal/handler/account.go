@@ -125,18 +125,36 @@ func (h *AccountHandler) Overview(ctx *fasthttp.RequestCtx) {
 	})
 }
 
-// Create handles POST /api/accounts/{protocol} seamlessly for BOTH:
+// Create handles POST /api/accounts/{protocol} (and POST /api/accounts with "protocol" in JSON body) seamlessly for BOTH:
 //  1. Single account creation (100% compatible standard payload: {"username":"...", "days":30, ...})
 //  2. Flash-Sale bulk creation of up to 1,000 accounts in 1 request (via `count > 1`, `accounts: [...]`, or top-level JSON array `[...]`).
 func (h *AccountHandler) Create(ctx *fasthttp.RequestCtx) {
-	protocol := getUserValue(ctx, "protocol")
+	protocol := strings.ToLower(strings.TrimSpace(getUserValue(ctx, "protocol")))
+	if protocol == "" {
+		protocol = strings.ToLower(strings.TrimSpace(string(ctx.QueryArgs().Peek("protocol"))))
+	}
 	if protocol == "cleanup" {
 		h.Cleanup(ctx)
 		return
 	}
 
+	rawBody := bytes.TrimSpace(ctx.PostBody())
+	if len(rawBody) == 0 {
+		writeError(ctx, fasthttp.StatusBadRequest, model.ErrValidation, "Empty JSON request body")
+		return
+	}
+
+	if protocol == "" && rawBody[0] == '{' {
+		var protoProbe struct {
+			Protocol string `json:"protocol"`
+		}
+		if json.Unmarshal(rawBody, &protoProbe) == nil {
+			protocol = strings.ToLower(strings.TrimSpace(protoProbe.Protocol))
+		}
+	}
+
 	if !h.validator.IsValidProtocol(protocol) {
-		writeError(ctx, fasthttp.StatusBadRequest, model.ErrValidation, "Invalid protocol")
+		writeError(ctx, fasthttp.StatusBadRequest, model.ErrValidation, "Invalid or missing protocol (expected: ssh, vless, vmess, trojan, noobz)")
 		return
 	}
 
@@ -150,12 +168,6 @@ func (h *AccountHandler) Create(ctx *fasthttp.RequestCtx) {
 			ctx.SetBody(cached.Payload)
 			return
 		}
-	}
-
-	rawBody := bytes.TrimSpace(ctx.PostBody())
-	if len(rawBody) == 0 {
-		writeError(ctx, fasthttp.StatusBadRequest, model.ErrValidation, "Empty JSON request body")
-		return
 	}
 
 	// Case 1: Top-level JSON Array `[ {...}, {...} ]` -> Bulk Create
@@ -449,7 +461,7 @@ func (h *AccountHandler) Update(ctx *fasthttp.RequestCtx) {
 	writeSuccess(ctx, fasthttp.StatusOK, "Account updated successfully", account)
 }
 
-// Delete handles DELETE /api/accounts/{protocol}/{username}.
+// Delete handles DELETE /api/accounts/{protocol}/{username} and POST /api/accounts/{protocol}/{username}/delete.
 func (h *AccountHandler) Delete(ctx *fasthttp.RequestCtx) {
 	protocol := getUserValue(ctx, "protocol")
 	username := getUserValue(ctx, "username")
@@ -466,7 +478,61 @@ func (h *AccountHandler) Delete(ctx *fasthttp.RequestCtx) {
 		return
 	}
 
-	writeSuccess(ctx, fasthttp.StatusOK, "Account deleted successfully", nil)
+	writeSuccess(ctx, fasthttp.StatusOK, "Account deleted successfully", map[string]interface{}{
+		"protocol": protocol,
+		"username": username,
+		"deleted":  true,
+	})
+}
+
+// DeleteAutoDetect handles DELETE /api/users/{username} and POST /api/users/{username}/delete
+// by automatically detecting which protocol(s) the username belongs to and deleting cleanly.
+func (h *AccountHandler) DeleteAutoDetect(ctx *fasthttp.RequestCtx) {
+	username := getUserValue(ctx, "username")
+	if !h.validator.IsValidUsername(username) {
+		writeError(ctx, fasthttp.StatusBadRequest, model.ErrValidation, "Invalid username")
+		return
+	}
+
+	protoFilter := strings.ToLower(strings.TrimSpace(string(ctx.QueryArgs().Peek("protocol"))))
+	if protoFilter == "" && len(ctx.PostBody()) > 0 {
+		var body struct {
+			Protocol string `json:"protocol"`
+		}
+		if json.Unmarshal(ctx.PostBody(), &body) == nil {
+			protoFilter = strings.ToLower(strings.TrimSpace(body.Protocol))
+		}
+	}
+
+	opCtx, cancel := opContext()
+	defer cancel()
+
+	if protoFilter != "" {
+		if !h.validator.IsValidProtocol(protoFilter) {
+			writeError(ctx, fasthttp.StatusBadRequest, model.ErrValidation, "Invalid protocol")
+			return
+		}
+		if err := h.service.DeleteAccount(opCtx, protoFilter, username); err != nil {
+			handleServiceError(ctx, err)
+			return
+		}
+		writeSuccess(ctx, fasthttp.StatusOK, "Account deleted successfully", map[string]interface{}{
+			"username":          username,
+			"deleted_protocols": []string{protoFilter},
+		})
+		return
+	}
+
+	deletedProtocols, err := h.service.DeleteUserAutoDetect(opCtx, username)
+	if err != nil {
+		handleServiceError(ctx, err)
+		return
+	}
+
+	writeSuccess(ctx, fasthttp.StatusOK, "User deleted across detected protocol(s)", map[string]interface{}{
+		"username":          username,
+		"deleted_protocols": deletedProtocols,
+	})
 }
 
 // Renew handles POST /api/accounts/{protocol}/{username}/renew.
@@ -499,6 +565,84 @@ func (h *AccountHandler) Renew(ctx *fasthttp.RequestCtx) {
 	}
 
 	writeSuccess(ctx, fasthttp.StatusOK, "Account renewed successfully", account)
+}
+
+// RenewAutoDetect handles POST /api/users/{username}/renew by automatically detecting
+// the user's protocol(s) and extending expiry (+ optional quota reset).
+func (h *AccountHandler) RenewAutoDetect(ctx *fasthttp.RequestCtx) {
+	username := getUserValue(ctx, "username")
+	if !h.validator.IsValidUsername(username) {
+		writeError(ctx, fasthttp.StatusBadRequest, model.ErrValidation, "Invalid username")
+		return
+	}
+
+	var body struct {
+		Protocol   string `json:"protocol"`
+		Days       int    `json:"days"`
+		ResetQuota bool   `json:"reset_quota"`
+	}
+	if err := json.Unmarshal(ctx.PostBody(), &body); err != nil {
+		writeError(ctx, fasthttp.StatusBadRequest, model.ErrValidation, "Invalid JSON request body")
+		return
+	}
+
+	renewReq := model.RenewAccountRequest{
+		Days:       body.Days,
+		ResetQuota: body.ResetQuota,
+	}
+	if details := h.validator.ValidateRenew(&renewReq); len(details) > 0 {
+		writeValidationError(ctx, "Validation failed", details)
+		return
+	}
+
+	protoFilter := strings.ToLower(strings.TrimSpace(body.Protocol))
+	if protoFilter == "" {
+		protoFilter = strings.ToLower(strings.TrimSpace(string(ctx.QueryArgs().Peek("protocol"))))
+	}
+
+	opCtx, cancel := opContext()
+	defer cancel()
+
+	if protoFilter != "" {
+		if !h.validator.IsValidProtocol(protoFilter) {
+			writeError(ctx, fasthttp.StatusBadRequest, model.ErrValidation, "Invalid protocol")
+			return
+		}
+		acc, err := h.service.RenewAccountWithOptions(opCtx, protoFilter, username, body.Days, body.ResetQuota)
+		if err != nil {
+			handleServiceError(ctx, err)
+			return
+		}
+		writeSuccess(ctx, fasthttp.StatusOK, "Account renewed successfully", acc)
+		return
+	}
+
+	renewed, err := h.service.RenewUserAutoDetect(opCtx, username, body.Days, body.ResetQuota)
+	if err != nil {
+		handleServiceError(ctx, err)
+		return
+	}
+
+	detected := make([]string, 0, len(renewed))
+	outputs := make([]model.BulkAccountOutput, 0, len(renewed))
+	for _, acc := range renewed {
+		detected = append(detected, acc.Protocol)
+		var cfgLink *model.ConfigLink
+		if h.xray != nil {
+			cfgLink, _ = h.xray.GetConfigLink(opCtx, acc.Protocol, acc.Username, acc.Secret, "")
+		}
+		outputs = append(outputs, model.BulkAccountOutput{
+			Account: acc,
+			Config:  cfgLink,
+		})
+	}
+
+	writeSuccess(ctx, fasthttp.StatusOK, "User renewed across detected protocol(s)", map[string]interface{}{
+		"username":           username,
+		"days_added":         body.Days,
+		"detected_protocols": detected,
+		"accounts":           outputs,
+	})
 }
 
 // Recover handles POST /api/accounts/{protocol}/{username}/recovery.
@@ -632,15 +776,27 @@ func (h *AccountHandler) Cleanup(ctx *fasthttp.RequestCtx) {
 	})
 }
 
-// CreateTrial handles POST /api/trials/{protocol} for BOTH 1 single trial AND up to 1,000 bulk trials (`count > 1`)!
+// CreateTrial handles POST /api/trials/{protocol} (and POST /api/trials with "protocol" in JSON body)
+// for BOTH 1 single trial AND up to 1,000 bulk trials (`count > 1`)!
 func (h *AccountHandler) CreateTrial(ctx *fasthttp.RequestCtx) {
-	protocol := getUserValue(ctx, "protocol")
+	protocol := strings.ToLower(strings.TrimSpace(getUserValue(ctx, "protocol")))
+	if protocol == "" {
+		protocol = strings.ToLower(strings.TrimSpace(string(ctx.QueryArgs().Peek("protocol"))))
+	}
 
 	var req model.TrialRequest
 	if len(ctx.PostBody()) > 0 {
 		if err := json.Unmarshal(ctx.PostBody(), &req); err != nil {
 			writeError(ctx, fasthttp.StatusBadRequest, model.ErrValidation, "Invalid JSON request body")
 			return
+		}
+		if protocol == "" {
+			var probe struct {
+				Protocol string `json:"protocol"`
+			}
+			if json.Unmarshal(ctx.PostBody(), &probe) == nil {
+				protocol = strings.ToLower(strings.TrimSpace(probe.Protocol))
+			}
 		}
 	}
 	if req.Duration == "" {

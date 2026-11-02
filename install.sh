@@ -2,12 +2,12 @@
 # ========================================================
 # Project: Autoscript VPN by risqinf
 # Description: AutoScript VPN & Tunneling Management System
-# Developed for Rocky Linux 9
-# Version: 5.5.0
+# Supported OS: Rocky Linux 9-10, RHEL 9-10, AlmaLinux 9-10, Oracle Linux 9-10
+# Version: 5.6.0
 # License: Apache License 2.0 (see LICENSE file)
 # Repository: https://github.com/risqinf/autoscript
 # ========================================================
-AS_VERSION="5.5.0"
+AS_VERSION="5.6.0"
 # --- Color Definitions ---
 NC='\033[0m'
 RED='\033[0;31m'
@@ -125,7 +125,73 @@ if [ "$EUID" -ne 0 ]; then
   exit 1
 fi
 
+# ========================================================
+# Enterprise Linux 9 & 10 Multi-Distro Verification & Repo Setup
+# Supports: Rocky Linux 9-10, RHEL 9-10, AlmaLinux 9-10, Oracle Linux 9-10
+# ========================================================
+detect_and_verify_el_os() {
+  EL_ID="unknown"
+  EL_MAJOR="0"
+  EL_PRETTY="Unknown Linux"
+  if [[ -r /etc/os-release ]]; then
+    # shellcheck disable=SC1091
+    . /etc/os-release
+    EL_ID="${ID:-unknown}"
+    EL_MAJOR="${VERSION_ID%%.*}"
+    EL_PRETTY="${PRETTY_NAME:-${NAME:-Linux}}"
+  fi
+
+  case "$EL_ID" in
+    rocky|rhel|almalinux|ol)
+      if [[ "$EL_MAJOR" != "9" && "$EL_MAJOR" != "10" ]]; then
+        print_error "Unsupported version: ${EL_PRETTY} (Major: ${EL_MAJOR})."
+        print_error "Supported OS: Rocky Linux 9-10, RHEL 9-10, AlmaLinux 9-10, Oracle Linux 9-10."
+        exit 1
+      fi
+      ;;
+    *)
+      if [[ "${FORCE_INSTALL:-0}" != "1" ]]; then
+        print_error "Unsupported distribution: ${EL_PRETTY} (ID=${EL_ID})."
+        print_error "Supported OS: Rocky Linux 9-10, RHEL 9-10, AlmaLinux 9-10, Oracle Linux 9-10."
+        exit 1
+      fi
+      ;;
+  esac
+}
+
+enable_el_repositories() {
+  print_info "Configuring Enterprise Linux ${EL_MAJOR} repositories for ${EL_PRETTY}..."
+  dnf install -y dnf-plugins-core curl ca-certificates >/dev/null 2>&1 || true
+
+  case "$EL_ID" in
+    rocky|almalinux)
+      dnf config-manager --set-enabled crb >/dev/null 2>&1 || \
+        dnf config-manager setopt crb.enabled=1 >/dev/null 2>&1 || true
+      dnf install -y epel-release >/dev/null 2>&1 || \
+        dnf install -y "https://dl.fedoraproject.org/pub/epel/epel-release-latest-${EL_MAJOR}.noarch.rpm" >/dev/null 2>&1 || true
+      ;;
+    rhel)
+      local arch_m; arch_m="$(uname -m)"
+      subscription-manager repos --enable "codeready-builder-for-rhel-${EL_MAJOR}-${arch_m}-rpms" >/dev/null 2>&1 || \
+        dnf config-manager --set-enabled "codeready-builder-for-rhel-${EL_MAJOR}-*" >/dev/null 2>&1 || \
+        dnf config-manager --set-enabled "rhui-codeready-builder-for-rhel-${EL_MAJOR}-*" >/dev/null 2>&1 || \
+        dnf config-manager setopt "codeready-builder-for-rhel-${EL_MAJOR}-${arch_m}-rpms.enabled=1" >/dev/null 2>&1 || true
+      dnf install -y "https://dl.fedoraproject.org/pub/epel/epel-release-latest-${EL_MAJOR}.noarch.rpm" >/dev/null 2>&1 || true
+      ;;
+    ol)
+      dnf config-manager --set-enabled "ol${EL_MAJOR}_codeready_builder" >/dev/null 2>&1 || \
+        dnf config-manager setopt "ol${EL_MAJOR}_codeready_builder.enabled=1" >/dev/null 2>&1 || true
+      dnf install -y "oracle-epel-release-el${EL_MAJOR}" >/dev/null 2>&1 || \
+        dnf install -y "https://dl.fedoraproject.org/pub/epel/epel-release-latest-${EL_MAJOR}.noarch.rpm" >/dev/null 2>&1 || true
+      ;;
+  esac
+
+  dnf makecache >/dev/null 2>&1 || true
+  print_success "Repositories ready (${EL_PRETTY} - EL${EL_MAJOR})."
+}
+
 detect_resources
+detect_and_verify_el_os
 
 # Password Root Change
 print_header
@@ -176,17 +242,16 @@ unset root_pass root_pass2 backup_pass backup_pass2
 print_success "Backup password saved to /etc/xray/backup.pass (chmod 600)."
 sleep 1
 
-print_info "Updating system repositories..."
-dnf install epel-release -y
-dnf makecache
+enable_el_repositories
 
 print_info "Installing core dependencies..."
-dnf install wget curl openssl sudo binutils coreutils gnupg2 bc vnstat htop lsof jq sqlite tar gzip python3 ruby rubygems -y
-gem install lolcat
-# Start the vnStat daemon so its database is created (the menu reads bandwidth
-# via vnstat; without the daemon it errors "Failed to open database").
-systemctl enable vnstat --now
-systemctl restart vnstat
+dnf install -y wget curl openssl sudo binutils coreutils gnupg2 bc htop lsof jq sqlite tar gzip bzip2 xz unzip python3 util-linux policycoreutils policycoreutils-python-utils
+dnf install -y vnstat ruby rubygems >/dev/null 2>&1 || true
+command -v gem >/dev/null 2>&1 && gem install lolcat >/dev/null 2>&1 || true
+if systemctl list-unit-files vnstat.service >/dev/null 2>&1; then
+  systemctl enable vnstat --now >/dev/null 2>&1 || true
+  systemctl restart vnstat >/dev/null 2>&1 || true
+fi
 print_success "Core packages installed."
 
 # Fix DNS
@@ -195,29 +260,47 @@ echo "nameserver 8.8.8.8" >/etc/resolv.conf
 echo "nameserver 1.1.1.1" >>/etc/resolv.conf
 print_success "DNS configured."
 
-# Fix Port OpenSSH & Permit Root Login
-print_info "Configuring SSH Access..."
-cd /etc/ssh
-sed -i 's/#Port 22/Port 22/g' sshd_config
-sed -i 's/#PermitRootLogin.*/PermitRootLogin yes/g' sshd_config
-sed -i 's/#PasswordAuthentication.*/PasswordAuthentication yes/g' sshd_config
-sed -i 's/PasswordAuthentication no/PasswordAuthentication yes/g' sshd_config
-grep -q "Port 3303" sshd_config || echo -e "Port 3303" >>sshd_config
-if ! grep -q "# AUTOSCRIPT-TUNNEL-HARDENING" sshd_config; then
-  cat >>sshd_config <<'EOF'
+# Fix Port OpenSSH, SELinux ssh_port_t 3303 & Strict Tunnel Isolation (EL9 & EL10)
+print_info "Hardening OpenSSH Access (Port 22, 3303)..."
+if command -v getenforce >/dev/null 2>&1 && [[ "$(getenforce 2>/dev/null)" != "Disabled" ]] && command -v semanage >/dev/null 2>&1; then
+  semanage port -a -t ssh_port_t -p tcp 3303 >/dev/null 2>&1 || \
+    semanage port -m -t ssh_port_t -p tcp 3303 >/dev/null 2>&1 || true
+fi
+mkdir -p /etc/ssh/sshd_config.d
+# On EL9/EL10, /etc/ssh/sshd_config.d/*.conf is evaluated in lexical order and
+# first-match wins over cloud-init's 50-cloud-init.conf (PasswordAuthentication no).
+cat >/etc/ssh/sshd_config.d/00-autoscript.conf <<'EOF'
+# Autoscript v5.6.0 Hardened OpenSSH Configuration (EL9 & EL10)
+Port 22
+Port 3303
+PermitRootLogin yes
+PasswordAuthentication yes
+KbdInteractiveAuthentication no
+UseDNS no
+LoginGraceTime 60
+MaxAuthTries 5
+MaxStartups 100:30:200
+ClientAliveInterval 60
+ClientAliveCountMax 3
+X11Forwarding no
+AllowAgentForwarding no
 
-# AUTOSCRIPT-TUNNEL-HARDENING
 Match User *,!root
     X11Forwarding no
     AllowAgentForwarding no
+    AllowStreamLocalForwarding no
     PermitTunnel no
     GatewayPorts no
+    PermitTTY no
 EOF
+chmod 600 /etc/ssh/sshd_config.d/00-autoscript.conf
+if [[ -f /etc/ssh/sshd_config ]]; then
+  sed -i 's/^#*PasswordAuthentication.*/PasswordAuthentication yes/g' /etc/ssh/sshd_config
+  sed -i 's/^#*PermitRootLogin.*/PermitRootLogin yes/g' /etc/ssh/sshd_config
 fi
-cd
 systemctl daemon-reload
 systemctl restart sshd
-print_success "SSH Hardening complete (Port 22, 3303)."
+print_success "OpenSSH hardened & active on ports 22 and 3303."
 
 # Register the nologin shell so PAM (pam_shells) accepts tunneling accounts.
 # Without this, SSH/WS logins fail with "incorrect username or password"
@@ -296,6 +379,16 @@ menu_install_logic() {
     mkdir -p /usr/local/sbin/rdns/presets /etc/rdns/presets
     cp -rf "$srcdir/scripts/rdns/presets/"*.json /usr/local/sbin/rdns/presets/ 2>/dev/null || true
     cp -rf "$srcdir/scripts/rdns/presets/"*.json /etc/rdns/presets/ 2>/dev/null || true
+  fi
+
+  # Cache prebuilt hardened binaries (Dropbear 2019.78, dnstt-server) locally if bundled
+  if [[ -d "$srcdir/bin" ]]; then
+    mkdir -p /usr/local/share/autoscript/bin
+    cp -rf "$srcdir/bin/"* /usr/local/share/autoscript/bin/ 2>/dev/null || true
+  fi
+  if [[ -f "$srcdir/scripts/build/build-dropbear-2019.sh" ]]; then
+    mkdir -p /usr/local/share/autoscript/build
+    install -m 0755 "$srcdir/scripts/build/build-dropbear-2019.sh" /usr/local/share/autoscript/build/build-dropbear-2019.sh
   fi
 
   # Install the API & Uninstaller helper commands
@@ -397,55 +490,146 @@ echo -e "$domain" >/etc/xray/domain
 print_success "Domain set to: $domain"
 sleep 1
 
-# Install Dropbear on EL9 (strict TLSv1.2+ certificate verification)
+# Install Prebuilt Hardened Static Dropbear 2019.78 (Zero Compile Time on EL9 & EL10)
 dropbear_install_logic() {
-  print_info "Compiling Dropbear 2022.82 for Rocky Linux 9..."
-  dnf groupinstall "Development Tools" -y >/dev/null 2>&1
-  dnf install zlib-devel curl bzip2 -y >/dev/null 2>&1
-  local db_ver="2022.82"
-  local db_tmp
-  db_tmp=$(mktemp -d /tmp/dropbear-src.XXXXXX)
-  chmod 700 "$db_tmp"
-  cd "$db_tmp"
-  curl -fsSL --proto '=https' --tlsv1.2 -o "dropbear-${db_ver}.tar.bz2" "https://matt.ucc.asn.au/dropbear/releases/dropbear-${db_ver}.tar.bz2" || \
-    curl -fsSL --proto '=https' --tlsv1.2 -o "dropbear-${db_ver}.tar.bz2" "https://dropbear.nl/mirror/releases/dropbear-${db_ver}.tar.bz2"
-  if ! bzip2 -t "dropbear-${db_ver}.tar.bz2" 2>/dev/null; then
-    print_error "Dropbear source archive verification failed."
-    cd /root && rm -rf "$db_tmp"
-    return 1
+  local db_ver="2019.78"
+  local arch_label=""
+  case "$(uname -m)" in
+    x86_64|amd64)  arch_label="linux-amd64" ;;
+    aarch64|arm64) arch_label="linux-arm64" ;;
+  esac
+
+  local archive_name="dropbear-${db_ver}-${arch_label}.tar.gz"
+  local sha_name="dropbear-${db_ver}-${arch_label}.sha256"
+  local prebuilt_ok=0
+  local script_dir; script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd || pwd)"
+
+  if [[ -n "$arch_label" ]]; then
+    print_info "Installing Prebuilt Hardened Dropbear ${db_ver} (${arch_label})..."
+    local db_tmp; db_tmp="$(mktemp -d /tmp/dropbear-prebuilt.XXXXXX)"
+    chmod 700 "$db_tmp"
+
+    local -a candidate_pairs=(
+      "${script_dir}/bin/${archive_name}|${script_dir}/bin/${sha_name}"
+      "/usr/local/share/autoscript/bin/${archive_name}|/usr/local/share/autoscript/bin/${sha_name}"
+      "https://github.com/${REPO_OWNER}/${REPO_NAME}/releases/latest/download/${archive_name}|https://github.com/${REPO_OWNER}/${REPO_NAME}/releases/latest/download/${sha_name}"
+      "https://raw.githubusercontent.com/${REPO_OWNER}/${REPO_NAME}/${REPO_BRANCH}/bin/${archive_name}|https://raw.githubusercontent.com/${REPO_OWNER}/${REPO_NAME}/${REPO_BRANCH}/bin/${sha_name}"
+    )
+
+    local pair src_arc src_sha exp_hash act_hash
+    for pair in "${candidate_pairs[@]}"; do
+      src_arc="${pair%%|*}"
+      src_sha="${pair#*|}"
+      rm -f "${db_tmp}/${archive_name}" "${db_tmp}/${sha_name}"
+
+      if [[ "$src_arc" == http* ]]; then
+        curl -fsSL --proto '=https' --tlsv1.2 --connect-timeout 10 --max-time 60 \
+          -o "${db_tmp}/${archive_name}" "$src_arc" 2>/dev/null || continue
+        curl -fsSL --proto '=https' --tlsv1.2 --connect-timeout 10 --max-time 30 \
+          -o "${db_tmp}/${sha_name}" "$src_sha" 2>/dev/null || continue
+      else
+        [[ -s "$src_arc" && -s "$src_sha" ]] || continue
+        cp -f "$src_arc" "${db_tmp}/${archive_name}"
+        cp -f "$src_sha" "${db_tmp}/${sha_name}"
+      fi
+
+      exp_hash=$(awk '{print $1; exit}' "${db_tmp}/${sha_name}" | tr -d '[:space:]')
+      act_hash=$(sha256sum "${db_tmp}/${archive_name}" | awk '{print $1}')
+      if [[ -z "$exp_hash" || "$exp_hash" != "$act_hash" ]]; then
+        print_warn "SHA-256 mismatch on ${src_arc}; trying next verified source..."
+        continue
+      fi
+
+      mkdir -p "${db_tmp}/extract"
+      if tar -xzf "${db_tmp}/${archive_name}" -C "${db_tmp}/extract" 2>/dev/null; then
+        if (cd "${db_tmp}/extract" && [[ -s SHA256SUMS ]] && sha256sum -c SHA256SUMS >/dev/null 2>&1) && \
+           [[ -f "${db_tmp}/extract/dropbear" && -f "${db_tmp}/extract/dropbearkey" ]]; then
+          install -m 0755 "${db_tmp}/extract/dropbear" /usr/sbin/dropbear
+          install -m 0755 "${db_tmp}/extract/dropbearkey" /usr/bin/dropbearkey
+          ln -sf /usr/bin/dropbearkey /usr/sbin/dropbearkey
+          if /usr/sbin/dropbear -V 2>&1 | grep -q "2019.78"; then
+            prebuilt_ok=1
+            print_success "Prebuilt Hardened Dropbear ${db_ver} SHA-256 verified & installed instantly."
+            break
+          fi
+        fi
+      fi
+    done
+    rm -rf "$db_tmp"
   fi
-  tar xjf "dropbear-${db_ver}.tar.bz2" >/dev/null 2>&1
-  cd "dropbear-${db_ver}"
-  ./configure --prefix=/usr --sysconfdir=/etc/dropbear >/dev/null 2>&1
-  make -j"$(nproc)" >/dev/null 2>&1
-  make install >/dev/null 2>&1
-  cd /root
-  rm -rf "$db_tmp"
+
+  # Emergency fallback: compile Dropbear 2019.78 from SHA-256-pinned upstream source if prebuilt unavailable
+  if [[ "$prebuilt_ok" -ne 1 ]]; then
+    print_warn "Prebuilt Dropbear ${db_ver} unavailable for $(uname -m); building hardened ${db_ver} from pinned source..."
+    dnf groupinstall "Development Tools" -y >/dev/null 2>&1 || dnf install -y gcc make >/dev/null 2>&1
+    dnf install -y zlib-devel libxcrypt-devel curl bzip2 >/dev/null 2>&1
+    local db_src_sha="525965971272270995364a0eb01f35180d793182e63dd0b0c3eb0292291644a4"
+    local db_tmp
+    db_tmp=$(mktemp -d /tmp/dropbear-src.XXXXXX)
+    chmod 700 "$db_tmp"
+    cd "$db_tmp"
+    curl -fsSL --proto '=https' --tlsv1.2 -o "dropbear-${db_ver}.tar.bz2" "https://matt.ucc.asn.au/dropbear/releases/dropbear-${db_ver}.tar.bz2" || \
+      curl -fsSL --proto '=https' --tlsv1.2 -o "dropbear-${db_ver}.tar.bz2" "https://dropbear.nl/mirror/releases/dropbear-${db_ver}.tar.bz2"
+    if ! echo "${db_src_sha}  dropbear-${db_ver}.tar.bz2" | sha256sum -c - >/dev/null 2>&1; then
+      print_error "Dropbear ${db_ver} source SHA-256 verification failed."
+      cd /root && rm -rf "$db_tmp"
+      return 1
+    fi
+    tar xjf "dropbear-${db_ver}.tar.bz2" >/dev/null 2>&1
+    cd "dropbear-${db_ver}"
+    cat > localoptions.h <<'LOEOF'
+#define DROPBEAR_SMALL_CODE 0
+#define DROPBEAR_X11FWD 0
+#define DROPBEAR_SVR_REMOTETCPFWD 0
+#define DROPBEAR_SVR_AGENTFWD 0
+#define DROPBEAR_DSS 0
+#define DROPBEAR_3DES 0
+#define DO_HOST_LOOKUP 0
+#define DO_MOTD 0
+#define MAX_UNAUTH_PER_IP 15
+#define MAX_UNAUTH_CLIENTS 128
+#define AUTH_TIMEOUT 60
+LOEOF
+    CFLAGS="-Os -fcommon -fstack-protector-strong" ./configure --prefix=/usr --sysconfdir=/etc/dropbear --disable-pam --disable-wtmp --disable-lastlog >/dev/null 2>&1
+    make -j"$(nproc)" PROGRAMS="dropbear dropbearkey" >/dev/null 2>&1
+    install -m 0755 dropbear /usr/sbin/dropbear
+    install -m 0755 dropbearkey /usr/bin/dropbearkey
+    ln -sf /usr/bin/dropbearkey /usr/sbin/dropbearkey
+    cd /root
+    rm -rf "$db_tmp"
+  fi
 
   cat >/etc/systemd/system/dropbear.service <<'EOF'
 [Unit]
-Description=Dropbear SSH Server
+Description=Dropbear 2019.78 Hardened SSH Server
 After=network.target rsyslog.service
+StartLimitIntervalSec=0
 
 [Service]
 Type=simple
 KillMode=process
 # No -E: log via syslog (authpriv) so logins reach /var/log/secure.
-# -F keeps it in the foreground for systemd Type=simple; -w blocks root login on Dropbear.
-ExecStart=/usr/sbin/dropbear -F -w -p 109 -p 143 -b /etc/issue.net -r /etc/dropbear/dropbear_rsa_host_key -W 65536
+# -F foreground | -w block root | -g block root password | -K 60 keepalive | -I 300 idle | -T 5 max tries
+ExecStart=/usr/sbin/dropbear -F -w -g -K 60 -I 300 -T 5 -p 109 -p 143 -b /etc/issue.net -r /etc/dropbear/dropbear_rsa_host_key -r /etc/dropbear/dropbear_ecdsa_host_key -W 65536
 Restart=always
+RestartSec=1s
+LimitNOFILE=524288
 
 [Install]
 WantedBy=multi-user.target
 EOF
 
   mkdir -p /etc/dropbear
-  [ -f /etc/dropbear/dropbear_rsa_host_key ] || dropbearkey -t rsa -f /etc/dropbear/dropbear_rsa_host_key >/dev/null 2>&1
+  chmod 700 /etc/dropbear
+  [[ -f /etc/dropbear/dropbear_rsa_host_key ]] || /usr/bin/dropbearkey -t rsa -s 2048 -f /etc/dropbear/dropbear_rsa_host_key >/dev/null 2>&1
+  [[ -f /etc/dropbear/dropbear_ecdsa_host_key ]] || /usr/bin/dropbearkey -t ecdsa -f /etc/dropbear/dropbear_ecdsa_host_key >/dev/null 2>&1
+  chmod 600 /etc/dropbear/dropbear_*_host_key 2>/dev/null || true
   echo -e "Enterprise VPN Server" >/etc/issue.net
   systemctl daemon-reload
   systemctl enable dropbear --now >/dev/null 2>&1
+  systemctl restart dropbear >/dev/null 2>&1
   check_service dropbear
-  print_success "Dropbear installed and running on port 109."
+  print_success "Hardened Dropbear 2019.78 running on ports 109 and 143."
 }
 
 print_header
@@ -531,6 +715,7 @@ sshws_install_logic() {
 Description=GO-TUNNEL PRO SSH WebSocket Proxy
 After=network.target dropbear.service
 Wants=network-online.target
+StartLimitIntervalSec=0
 
 [Service]
 Type=simple
@@ -538,7 +723,7 @@ User=root
 ExecStart=/usr/local/bin/ssh-ws -b 0.0.0.0 -p 8888 -t 127.0.0.1:109 \
   -l /var/log/ssh-ws.log --auth-log /var/log/secure --api-port 8081
 Restart=always
-RestartSec=5
+RestartSec=1s
 LimitNOFILE=1000000
 
 [Install]
@@ -1058,6 +1243,7 @@ EOF
 Description=Xray Service
 Documentation=https://github.com/XTLS/Xray-core
 After=network.target nss-lookup.target
+StartLimitIntervalSec=0
 
 [Service]
 Type=simple
@@ -1067,8 +1253,8 @@ AmbientCapabilities=CAP_NET_ADMIN CAP_NET_BIND_SERVICE
 NoNewPrivileges=true
 ExecStart=/usr/local/bin/xray run -config /etc/xray/config.json
 ExecReload=/bin/kill -HUP \$MAINPID
-Restart=on-failure
-RestartSec=5s
+Restart=always
+RestartSec=1s
 
 # Resource Limits
 LimitNOFILE=1048576
@@ -1441,8 +1627,10 @@ server {
         proxy_set_header Host \$host;
         proxy_set_header X-Real-IP \$remote_addr;
         proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
-        proxy_read_timeout 60s;
-        proxy_send_timeout 60s;
+        proxy_connect_timeout 10s;
+        proxy_read_timeout 120s;
+        proxy_send_timeout 120s;
+        proxy_next_upstream off;
         client_max_body_size 8m;
     }
 
@@ -1600,8 +1788,10 @@ server {
         proxy_set_header Host \$host;
         proxy_set_header X-Real-IP \$remote_addr;
         proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
-        proxy_read_timeout 60s;
-        proxy_send_timeout 60s;
+        proxy_connect_timeout 10s;
+        proxy_read_timeout 120s;
+        proxy_send_timeout 120s;
+        proxy_next_upstream off;
         client_max_body_size 8m;
     }
 }
@@ -2079,7 +2269,8 @@ ovpn_install_logic() {
   echo "=================================================="
   WEB_DIR="/var/www/html/risqinf/openvpn"
   EASYRSA_DIR="/etc/openvpn/easy-rsa"
-  dnf install -y openvpn easy-rsa iptables-services
+  dnf install -y openvpn easy-rsa
+  dnf install -y iptables-nft >/dev/null 2>&1 || dnf install -y iptables-services >/dev/null 2>&1 || true
   mkdir -p $WEB_DIR
   mkdir -p $EASYRSA_DIR
   mkdir -p /etc/openvpn/server
@@ -2122,6 +2313,11 @@ ovpn_install_logic() {
     print_error "OpenVPN certificate generation failed; client profiles may not work."
   fi
   PLUGIN_PAM="/usr/lib64/openvpn/plugins/openvpn-plugin-auth-pam.so"
+  if [[ ! -f "$PLUGIN_PAM" ]]; then
+    local found_pam
+    found_pam=$(find /usr/lib64 /usr/lib -name "openvpn-plugin-auth-pam.so" 2>/dev/null | head -1 || true)
+    [[ -n "$found_pam" ]] && PLUGIN_PAM="$found_pam"
+  fi
 
   # TCP Server Config
   cat >/etc/openvpn/server/server-tcp-1194.conf <<EOF

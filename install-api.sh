@@ -2,7 +2,8 @@
 # ========================================================
 # Project: Autoscript VPN by risqinf
 # Description: Enterprise RESTful API Server Installer & Builder
-# Developed for Rocky Linux 9 / Enterprise Linux
+# Supported OS: Rocky Linux 9-10, RHEL 9-10, AlmaLinux 9-10, Oracle Linux 9-10
+# Version: 5.6.0
 # License: Apache License 2.0 (see LICENSE file)
 # Repository: https://github.com/risqinf/autoscript
 # ========================================================
@@ -177,19 +178,31 @@ install_binary_from_release() {
         return 1
     fi
 
-    # Verify sha256 if checksum file was downloaded
+    # Verify sha256 strictly (fail-closed: check outer sidecar or inner .sha256)
+    local inner_cs="${tmpdir}/${binary_name}.sha256"
     if [[ -f "$checksum_file" && -s "$checksum_file" ]]; then
         local expected_hash
-        expected_hash=$(awk '{print $1}' "$checksum_file")
+        expected_hash=$(awk '{print $1; exit}' "$checksum_file" | tr -d '[:space:]')
         local actual_hash
         actual_hash=$(sha256sum "$extracted_bin" | awk '{print $1}')
-        if [[ "$expected_hash" != "$actual_hash" ]]; then
-            print_warn "Checksum mismatch! Expected: ${expected_hash}, Got: ${actual_hash}"
+        if [[ -z "$expected_hash" || "$expected_hash" != "$actual_hash" ]]; then
+            print_error "SHA-256 checksum mismatch! Expected: ${expected_hash}, Got: ${actual_hash}"
             return 1
         fi
-        print_ok "Checksum verified: OK"
+        print_ok "SHA-256 checksum verified: OK"
+    elif [[ -f "$inner_cs" && -s "$inner_cs" ]]; then
+        local expected_hash
+        expected_hash=$(awk '{print $1; exit}' "$inner_cs" | tr -d '[:space:]')
+        local actual_hash
+        actual_hash=$(sha256sum "$extracted_bin" | awk '{print $1}')
+        if [[ -z "$expected_hash" || "$expected_hash" != "$actual_hash" ]]; then
+            print_error "SHA-256 checksum mismatch! Expected: ${expected_hash}, Got: ${actual_hash}"
+            return 1
+        fi
+        print_ok "SHA-256 checksum verified: OK"
     else
-        print_warn "Checksum file unavailable — skipping verification."
+        print_error "SHA-256 checksum file missing — refusing unverified binary."
+        return 1
     fi
 
     # Install binary
@@ -293,10 +306,11 @@ fi
 print_info "Installing systemd service..."
 cat >"$SERVICE_FILE" <<'EOF'
 [Unit]
-Description=Autoscript VPN Enterprise API Server (v5.5.0)
+Description=Autoscript VPN Enterprise API Server (v5.6.0)
 Documentation=https://github.com/risqinf/autoscript
 After=network.target xray.service dropbear.service
 Wants=network-online.target
+StartLimitIntervalSec=0
 
 [Service]
 Type=simple
@@ -313,7 +327,9 @@ Environment=XRAY_CONFIG=/etc/xray/config.json
 Environment=XRAY_BIN=/usr/local/bin/xray
 ExecStart=/usr/local/bin/api-server
 Restart=always
-RestartSec=3s
+RestartSec=1s
+TimeoutStopSec=20
+OOMScoreAdjust=-900
 LimitNOFILE=1048576
 
 [Install]
@@ -375,7 +391,7 @@ echo ""
 echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
 echo -e "${GREEN}${BOLD}           API SERVER INSTALLATION SUCCESSFUL!              ${NC}"
 echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
-echo -e " ${WHITE}Version${NC}         : ${CYAN}${LATEST_TAG:-v5.5.0}${NC}"
+echo -e " ${WHITE}Version${NC}         : ${CYAN}${LATEST_TAG:-v5.6.0}${NC}"
 echo -e " ${WHITE}Security Mode${NC}   : ${GREEN}STRICT (5-Layer SHA-256 + HMAC-SHA256)${NC}"
 echo -e " ${WHITE}Endpoint Local${NC}  : ${CYAN}http://127.0.0.1:9000${NC}"
 echo -e " ${WHITE}Endpoint Public${NC} : ${CYAN}https://${DOMAIN}${NC}"

@@ -1,9 +1,10 @@
 #!/usr/bin/env bash
 # ========================================================
 # Project: Autoscript VPN by risqinf
-# Description: Complete Firewalld, SELinux (Nginx/HAProxy Permission Fix)
-#              & Localhost Control-Port Isolation for Rocky Linux 9
-# Version: 5.5.0
+# Description: Complete Firewalld, SELinux (Nginx/HAProxy/SSH Permission Fix)
+#              & Localhost Control-Port Isolation for EL9 & EL10
+#              (Rocky 9-10, RHEL 9-10, AlmaLinux 9-10, Oracle Linux 9-10)
+# Version: 5.6.0
 # License: Apache License 2.0 (see LICENSE file)
 # Repository: https://github.com/risqinf/autoscript
 # ========================================================
@@ -151,6 +152,9 @@ apply_selinux_fixes() {
       semanage port -a -t http_port_t -p tcp "$hp" >/dev/null 2>&1 || \
       semanage port -m -t http_port_t -p tcp "$hp" >/dev/null 2>&1 || true
     done
+    # Register non-standard OpenSSH port 3303 into ssh_port_t for EL9/EL10 SELinux Enforcing
+    semanage port -a -t ssh_port_t -p tcp 3303 >/dev/null 2>&1 || \
+    semanage port -m -t ssh_port_t -p tcp 3303 >/dev/null 2>&1 || true
   fi
 
   # Ensure Nginx webroot & log directories have proper permissions and SELinux labels
@@ -232,8 +236,10 @@ verify_proxy_services() {
             print "        proxy_set_header Host $host;"
             print "        proxy_set_header X-Real-IP $remote_addr;"
             print "        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;"
-            print "        proxy_read_timeout 60s;"
-            print "        proxy_send_timeout 60s;"
+            print "        proxy_connect_timeout 10s;"
+            print "        proxy_read_timeout 120s;"
+            print "        proxy_send_timeout 120s;"
+            print "        proxy_next_upstream off;"
             print "        client_max_body_size 8m;"
             print "    }"
             in_82=0

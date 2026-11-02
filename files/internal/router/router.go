@@ -90,8 +90,9 @@ func (r *Router) RegisterAccountRoutes(h *handler.AccountHandler) {
 		// Cryptographic verification diagnostic endpoint
 		r.router.GET(prefix+"/auth/verify", r.protected(h.AuthVerify))
 
-		// Cross-protocol overview & maintenance
+		// Cross-protocol overview, unified body-protocol create, & maintenance
 		r.router.GET(prefix+"/accounts", r.protected(h.Overview))
+		r.router.POST(prefix+"/accounts", r.protected(h.Create))
 		r.router.POST(prefix+"/system/cleanup", r.protected(h.Cleanup))
 
 		// Standard Account Collection CRUD (POST creates 1 OR up to 1,000 accounts in 1 request; PUT/DELETE operate on batch lists)
@@ -104,6 +105,7 @@ func (r *Router) RegisterAccountRoutes(h *handler.AccountHandler) {
 		r.router.GET(prefix+"/accounts/{protocol}/{username}", r.protected(h.Get))
 		r.router.PUT(prefix+"/accounts/{protocol}/{username}", r.protected(h.Update))
 		r.router.DELETE(prefix+"/accounts/{protocol}/{username}", r.protected(h.Delete))
+		r.router.POST(prefix+"/accounts/{protocol}/{username}/delete", r.protected(h.Delete))
 		r.router.POST(prefix+"/accounts/{protocol}/{username}/renew", r.protected(h.Renew))
 		r.router.POST(prefix+"/accounts/{protocol}/{username}/recovery", r.protected(h.Recover))
 		r.router.POST(prefix+"/accounts/{protocol}/{username}/suspend", r.protected(h.Suspend))
@@ -111,7 +113,13 @@ func (r *Router) RegisterAccountRoutes(h *handler.AccountHandler) {
 		r.router.POST(prefix+"/accounts/{protocol}/{username}/reset-quota", r.protected(h.ResetQuota))
 		r.router.POST(prefix+"/accounts/{protocol}/{username}/kick", r.protected(h.Kick))
 
+		// Auto-Detect User Actions by Username (no protocol required in URL)
+		r.router.DELETE(prefix+"/users/{username}", r.protected(h.DeleteAutoDetect))
+		r.router.POST(prefix+"/users/{username}/delete", r.protected(h.DeleteAutoDetect))
+		r.router.POST(prefix+"/users/{username}/renew", r.protected(h.RenewAutoDetect))
+
 		// Standard Trials Endpoint (handles 1 single trial OR `count > 1` bulk trials seamlessly)
+		r.router.POST(prefix+"/trials", r.protected(h.CreateTrial))
 		r.router.POST(prefix+"/trials/{protocol}", r.protected(h.CreateTrial))
 
 		// Connection Configs (GetConfig also serves /config/openvpn/{username} when protocol == "openvpn")
@@ -124,6 +132,10 @@ func (r *Router) RegisterMonitorRoutes(h *handler.MonitorHandler) {
 	for _, prefix := range []string{"/api", "/api/v1"} {
 		r.router.GET(prefix+"/status", r.protected(h.Status))
 		r.router.GET(prefix+"/bandwidth", r.protected(h.Bandwidth))
+
+		// Auto-Detect User Login & Full Telemetry by Username (no protocol required!)
+		r.router.GET(prefix+"/users/{username}", r.protected(h.UserLoginAutoDetect))
+		r.router.GET(prefix+"/users/{username}/login", r.protected(h.UserLoginAutoDetect))
 
 		// Live session monitor + accessed apps/domains + protocol/transport + ISP + GeoIP
 		r.router.GET(prefix+"/monitor", r.protected(h.UnifiedMonitor))

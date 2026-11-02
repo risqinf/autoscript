@@ -1,8 +1,9 @@
 [Unit]
-Description=Autoscript VPN Enterprise API Server (v5.5.0)
+Description=Autoscript VPN Enterprise API Server (v5.6.0)
 Documentation=https://github.com/risqinf/autoscript
 After=network.target xray.service dropbear.service
 Wants=network-online.target
+StartLimitIntervalSec=0
 
 [Service]
 Type=simple
@@ -10,8 +11,9 @@ User=root
 WorkingDirectory=/root
 ExecStart=/usr/local/bin/api-server
 Restart=always
-RestartSec=3
+RestartSec=1s
 TimeoutStopSec=20
+OOMScoreAdjust=-900
 
 # Environment
 Environment=API_LISTEN=127.0.0.1:9000

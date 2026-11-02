@@ -10,7 +10,6 @@ import (
 	"os"
 	"os/exec"
 	"regexp"
-	"runtime"
 	"strconv"
 	"strings"
 	"sync"
@@ -31,9 +30,11 @@ type AccountService interface {
 	CreateBulkAccounts(ctx context.Context, protocol string, req *model.BulkCreateRequest) (*model.BulkCreateResult, error)
 	DeleteAccount(ctx context.Context, protocol, username string) error
 	DeleteBulkAccounts(ctx context.Context, protocol string, usernames []string) (int, error)
+	DeleteUserAutoDetect(ctx context.Context, username string) ([]string, error)
 	RenewAccount(ctx context.Context, protocol, username string, days int) (*model.Account, error)
 	RenewAccountWithOptions(ctx context.Context, protocol, username string, days int, resetQuota bool) (*model.Account, error)
 	RenewBulkAccounts(ctx context.Context, protocol string, usernames []string, days int) ([]*model.Account, error)
+	RenewUserAutoDetect(ctx context.Context, username string, days int, resetQuota bool) ([]*model.Account, error)
 	RecoverAccount(ctx context.Context, protocol, username string) error
 	SuspendAccount(ctx context.Context, protocol, username, reason string) (*model.Account, error)
 	UnsuspendAccount(ctx context.Context, protocol, username string) (*model.Account, error)
@@ -49,14 +50,16 @@ type AccountService interface {
 
 // accountService implements AccountService.
 type accountService struct {
-	repo        repository.AccountRepository
-	apiRepo     repository.APIRepository
-	xraySvc     XrayService
-	xrayMutator *XrayConfigMutator
-	snap        *cache.SnapshotCache
-	config      *config.Config
-	logger      *zerolog.Logger
-	httpClient  *http.Client
+	repo          repository.AccountRepository
+	apiRepo       repository.APIRepository
+	xraySvc       XrayService
+	xrayMutator   *XrayConfigMutator
+	shadowMutator *ShadowMutator
+	noobzMu       sync.Mutex
+	snap          *cache.SnapshotCache
+	config        *config.Config
+	logger        *zerolog.Logger
+	httpClient    *http.Client
 }
 
 // NewAccountService creates a new AccountService (backward-compatible constructor).
@@ -85,13 +88,14 @@ func NewAccountServiceFull(
 		xraySvc = NewXrayService(cfg, logger)
 	}
 	return &accountService{
-		repo:        repo,
-		apiRepo:     apiRepo,
-		xraySvc:     xraySvc,
-		xrayMutator: NewXrayConfigMutator(cfg, logger),
-		snap:        snap,
-		config:      cfg,
-		logger:      logger,
+		repo:          repo,
+		apiRepo:       apiRepo,
+		xraySvc:       xraySvc,
+		xrayMutator:   NewXrayConfigMutator(cfg, logger),
+		shadowMutator: NewShadowMutator(),
+		snap:          snap,
+		config:        cfg,
+		logger:        logger,
 		httpClient: &http.Client{
 			Timeout: 800 * time.Millisecond,
 		},
@@ -456,9 +460,12 @@ func (s *accountService) CreateBulkAccounts(ctx context.Context, protocol string
 		if len(toPersist) > 0 {
 			if err := s.repo.CreateBatch(ctx, toPersist); err != nil {
 				if !skipSystemUserProvision() {
-					for _, acc := range toPersist {
-						_ = exec.CommandContext(ctx, "userdel", "--force", acc.Username).Run()
-					}
+					_ = s.shadowMutator.WithLock(func(_ string) error {
+						for _, acc := range toPersist {
+							_ = exec.CommandContext(ctx, "userdel", "--force", acc.Username).Run()
+						}
+						return nil
+					})
 				}
 				return nil, fmt.Errorf("db batch commit: %w", err)
 			}
@@ -522,54 +529,48 @@ func (s *accountService) provisionSSHUsersBatch(ctx context.Context, items []mod
 		return items, nil
 	}
 
-	nologin := "/usr/sbin/nologin"
-	if _, err := os.Stat(nologin); err != nil {
-		nologin = "/bin/false"
-	}
-
-	// Note: useradd acquires /etc/passwd lock sequentially in shadow-utils, so run sequentially without lock contention,
-	// then pipe ALL passwords into ONE single `chpasswd` invocation (10x faster than N chpasswd forks!).
 	var created []model.CreateAccountRequest
 	var errs []model.BulkItemError
-	var chpasswdBuf strings.Builder
 
-	for i, it := range items {
-		exp := computeExpiry(it.Days, it.Duration)
-		expStr := exp.Format("2006-01-02")
-		// Check if Linux user already exists as leftover
-		if exec.CommandContext(ctx, "id", it.Username).Run() == nil {
-			_ = exec.CommandContext(ctx, "usermod", "-s", nologin, "-e", expStr, "-U", it.Username).Run()
-		} else {
-			cmd := exec.CommandContext(ctx, "useradd", "-e", expStr, "-M", "-N", "-s", nologin, it.Username)
-			if out, err := cmd.CombinedOutput(); err != nil {
+	_ = s.shadowMutator.WithLock(func(nologin string) error {
+		var chpasswdBuf strings.Builder
+		for i, it := range items {
+			exp := computeExpiry(it.Days, it.Duration)
+			expStr := exp.Format("2006-01-02")
+			if exec.CommandContext(ctx, "id", it.Username).Run() == nil {
+				_ = exec.CommandContext(ctx, "usermod", "-s", nologin, "-e", expStr, "-U", it.Username).Run()
+			} else {
+				cmd := exec.CommandContext(ctx, "useradd", "-e", expStr, "-M", "-N", "-s", nologin, it.Username)
+				if out, err := cmd.CombinedOutput(); err != nil {
+					errs = append(errs, model.BulkItemError{
+						Index:    i,
+						Username: it.Username,
+						Reason:   "useradd failed: " + strings.TrimSpace(string(out)),
+					})
+					continue
+				}
+			}
+			created = append(created, it)
+			chpasswdBuf.WriteString(it.Username)
+			chpasswdBuf.WriteByte(':')
+			chpasswdBuf.WriteString(it.Password)
+			chpasswdBuf.WriteByte('\n')
+		}
+
+		if len(created) > 0 {
+			if out, err := runChpasswdBulk(ctx, chpasswdBuf.String()); err != nil {
+				for _, u := range created {
+					_ = exec.CommandContext(ctx, "userdel", "--force", u.Username).Run()
+				}
+				created = nil
 				errs = append(errs, model.BulkItemError{
-					Index:    i,
-					Username: it.Username,
-					Reason:   "useradd failed: " + strings.TrimSpace(string(out)),
+					Index:  0,
+					Reason: "batch chpasswd failed: " + strings.TrimSpace(string(out)),
 				})
-				continue
 			}
 		}
-		created = append(created, it)
-		chpasswdBuf.WriteString(it.Username)
-		chpasswdBuf.WriteByte(':')
-		chpasswdBuf.WriteString(it.Password)
-		chpasswdBuf.WriteByte('\n')
-	}
-
-	if len(created) > 0 {
-		chCmd := exec.CommandContext(ctx, "chpasswd")
-		chCmd.Stdin = strings.NewReader(chpasswdBuf.String())
-		if out, err := chCmd.CombinedOutput(); err != nil {
-			for _, u := range created {
-				_ = exec.CommandContext(ctx, "userdel", "--force", u.Username).Run()
-			}
-			return nil, append(errs, model.BulkItemError{
-				Index:  0,
-				Reason: "batch chpasswd failed: " + strings.TrimSpace(string(out)),
-			})
-		}
-	}
+		return nil
+	})
 
 	return created, errs
 }
@@ -578,60 +579,28 @@ func (s *accountService) provisionNoobzUsersBatch(ctx context.Context, items []m
 	if _, err := exec.LookPath("noobzvpns"); err != nil {
 		return
 	}
-	workers := runtime.NumCPU() * 2
-	if workers > 8 {
-		workers = 8
+	s.noobzMu.Lock()
+	defer s.noobzMu.Unlock()
+
+	for _, req := range items {
+		days := req.Days
+		if days <= 0 {
+			days = 1
+		}
+		args := []string{"add", req.Username, "-p", req.Password, "-e", strconv.Itoa(days)}
+		if req.Quota > 0 {
+			args = append(args, "-b", strconv.Itoa(req.Quota))
+		}
+		if req.LimitIP > 0 {
+			args = append(args, "-d", strconv.Itoa(req.LimitIP))
+		}
+		_ = exec.CommandContext(ctx, "noobzvpns", args...).Run()
 	}
-	sem := make(chan struct{}, workers)
-	var wg sync.WaitGroup
-	for _, it := range items {
-		wg.Add(1)
-		sem <- struct{}{}
-		go func(req model.CreateAccountRequest) {
-			defer wg.Done()
-			defer func() { <-sem }()
-			days := req.Days
-			if days <= 0 {
-				days = 1
-			}
-			args := []string{"add", req.Username, "-p", req.Password, "-e", strconv.Itoa(days)}
-			if req.Quota > 0 {
-				args = append(args, "-b", strconv.Itoa(req.Quota))
-			}
-			if req.LimitIP > 0 {
-				args = append(args, "-d", strconv.Itoa(req.LimitIP))
-			}
-			_ = exec.CommandContext(ctx, "noobzvpns", args...).Run()
-		}(it)
-	}
-	wg.Wait()
 }
 
 func (s *accountService) createSSHAccount(ctx context.Context, req *model.CreateAccountRequest) (*model.Account, error) {
 	expiry := computeExpiry(req.Days, req.Duration)
 	expiryStr := expiry.Format("2006-01-02")
-
-	if !skipSystemUserProvision() {
-		nologin := "/usr/sbin/nologin"
-		if _, err := os.Stat(nologin); err != nil {
-			nologin = "/bin/false"
-		}
-		if exec.CommandContext(ctx, "id", req.Username).Run() == nil {
-			_ = exec.CommandContext(ctx, "usermod", "-s", nologin, "-e", expiryStr, "-U", req.Username).Run()
-		} else {
-			cmd := exec.CommandContext(ctx, "useradd", "-e", expiryStr, "-M", "-N", "-s", nologin, req.Username)
-			if output, err := cmd.CombinedOutput(); err != nil {
-				return nil, fmt.Errorf("useradd failed: %s: %w", strings.TrimSpace(string(output)), err)
-			}
-		}
-
-		cmd := exec.CommandContext(ctx, "chpasswd")
-		cmd.Stdin = strings.NewReader(fmt.Sprintf("%s:%s\n", req.Username, req.Password))
-		if output, err := cmd.CombinedOutput(); err != nil {
-			_ = exec.CommandContext(ctx, "userdel", "--force", req.Username).Run()
-			return nil, fmt.Errorf("chpasswd failed: %s: %w", strings.TrimSpace(string(output)), err)
-		}
-	}
 
 	var quotaBytes int64
 	if req.Quota > 0 {
@@ -649,12 +618,16 @@ func (s *accountService) createSSHAccount(ctx context.Context, req *model.Create
 		Note:       req.Note,
 	}
 
+	// Reserve (protocol, username) atomically in SQLite WAL first so duplicate concurrent orders never collide on OS shadow
 	if err := s.repo.Create(ctx, account); err != nil {
-		if !skipSystemUserProvision() {
-			_ = exec.CommandContext(ctx, "userdel", "--force", req.Username).Run()
-		}
-		return nil, fmt.Errorf("create db record: %w", err)
+		return nil, err
 	}
+
+	if err := s.shadowMutator.CreateUser(ctx, req.Username, req.Password, expiryStr); err != nil {
+		_ = s.repo.Delete(ctx, "ssh", req.Username)
+		return nil, err
+	}
+
 	_ = s.repo.ResetQuota(ctx, "ssh", req.Username)
 	return account, nil
 }
@@ -687,10 +660,6 @@ func (s *accountService) createXrayAccount(ctx context.Context, protocol string,
 	}
 	expiry := computeExpiry(req.Days, req.Duration)
 
-	if err := s.xrayMutator.AddClientsBatch(ctx, protocol, []XrayClientSpec{{Username: req.Username, Secret: secret}}); err != nil {
-		return nil, fmt.Errorf("add xray client: %w", err)
-	}
-
 	account := &model.Account{
 		Protocol:   protocol,
 		Username:   req.Username,
@@ -702,9 +671,14 @@ func (s *accountService) createXrayAccount(ctx context.Context, protocol string,
 		Note:       req.Note,
 	}
 
+	// Reserve (protocol, username) atomically in SQLite WAL first so 100 simultaneous orders never clobber Xray config
 	if err := s.repo.Create(ctx, account); err != nil {
-		_ = s.xrayMutator.RemoveClientsBatch(ctx, protocol, []string{req.Username})
-		return nil, fmt.Errorf("create db record: %w", err)
+		return nil, err
+	}
+
+	if err := s.xrayMutator.AddClientsBatch(ctx, protocol, []XrayClientSpec{{Username: req.Username, Secret: secret}}); err != nil {
+		_ = s.repo.Delete(ctx, protocol, req.Username)
+		return nil, fmt.Errorf("add xray client: %w", err)
 	}
 
 	return account, nil
@@ -715,21 +689,6 @@ func (s *accountService) createNoobzAccount(ctx context.Context, req *model.Crea
 	var quotaBytes int64
 	if req.Quota > 0 {
 		quotaBytes = int64(req.Quota) * 1073741824
-	}
-
-	if _, err := exec.LookPath("noobzvpns"); err == nil {
-		days := req.Days
-		if days <= 0 {
-			days = 1
-		}
-		args := []string{"add", req.Username, "-p", req.Password, "-e", strconv.Itoa(days)}
-		if req.Quota > 0 {
-			args = append(args, "-b", strconv.Itoa(req.Quota))
-		}
-		if req.LimitIP > 0 {
-			args = append(args, "-d", strconv.Itoa(req.LimitIP))
-		}
-		_ = exec.CommandContext(ctx, "noobzvpns", args...).Run()
 	}
 
 	account := &model.Account{
@@ -743,9 +702,26 @@ func (s *accountService) createNoobzAccount(ctx context.Context, req *model.Crea
 		Note:       req.Note,
 	}
 	if err := s.repo.Create(ctx, account); err != nil {
-		_ = exec.CommandContext(ctx, "noobzvpns", "remove", req.Username).Run()
-		return nil, fmt.Errorf("create db record: %w", err)
+		return nil, err
 	}
+
+	if _, err := exec.LookPath("noobzvpns"); err == nil {
+		s.noobzMu.Lock()
+		days := req.Days
+		if days <= 0 {
+			days = 1
+		}
+		args := []string{"add", req.Username, "-p", req.Password, "-e", strconv.Itoa(days)}
+		if req.Quota > 0 {
+			args = append(args, "-b", strconv.Itoa(req.Quota))
+		}
+		if req.LimitIP > 0 {
+			args = append(args, "-d", strconv.Itoa(req.LimitIP))
+		}
+		_ = exec.CommandContext(ctx, "noobzvpns", args...).Run()
+		s.noobzMu.Unlock()
+	}
+
 	return account, nil
 }
 
@@ -769,9 +745,14 @@ func (s *accountService) DeleteAccount(ctx context.Context, protocol, username s
 
 	if protocol == "ssh" && !skipSystemUserProvision() {
 		_, _ = s.killSSHUserProcesses(ctx, username)
-		_ = exec.CommandContext(ctx, "userdel", "--force", username).Run()
+		_ = s.shadowMutator.WithLock(func(_ string) error {
+			_ = exec.CommandContext(ctx, "userdel", "--force", username).Run()
+			return nil
+		})
 	} else if protocol == "noobz" {
+		s.noobzMu.Lock()
 		_ = exec.CommandContext(ctx, "noobzvpns", "remove", username).Run()
+		s.noobzMu.Unlock()
 	}
 
 	_ = s.repo.WriteAuditLog(ctx, "api", "delete", protocol, username, "deleted via API")
@@ -796,17 +777,44 @@ func (s *accountService) DeleteBulkAccounts(ctx context.Context, protocol string
 	if protocol == "ssh" && !skipSystemUserProvision() {
 		for _, u := range usernames {
 			_, _ = s.killSSHUserProcesses(ctx, u)
-			_ = exec.CommandContext(ctx, "userdel", "--force", u).Run()
 		}
+		_ = s.shadowMutator.WithLock(func(_ string) error {
+			for _, u := range usernames {
+				_ = exec.CommandContext(ctx, "userdel", "--force", u).Run()
+			}
+			return nil
+		})
 	} else if protocol == "noobz" {
+		s.noobzMu.Lock()
 		for _, u := range usernames {
 			_ = exec.CommandContext(ctx, "noobzvpns", "remove", u).Run()
 		}
+		s.noobzMu.Unlock()
 	}
 
 	_ = s.repo.WriteAuditLog(ctx, "api", "bulk_delete", protocol, fmt.Sprintf("batch(%d)", deleted), "")
 	s.invalidateCaches()
 	return deleted, nil
+}
+
+// DeleteUserAutoDetect automatically detects which protocol(s) username belongs to and deletes them cleanly.
+func (s *accountService) DeleteUserAutoDetect(ctx context.Context, username string) ([]string, error) {
+	accounts, err := s.repo.GetByUsernameAllProtocols(ctx, username)
+	if err != nil {
+		return nil, err
+	}
+	if len(accounts) == 0 {
+		return nil, model.ErrAccountNotFound
+	}
+
+	deletedProtocols := make([]string, 0, len(accounts))
+	for _, acc := range accounts {
+		if err := s.DeleteAccount(ctx, acc.Protocol, username); err != nil {
+			return deletedProtocols, err
+		}
+		deletedProtocols = append(deletedProtocols, acc.Protocol)
+	}
+	return deletedProtocols, nil
 }
 
 // RenewAccount extends an account's expiry.
@@ -839,14 +847,15 @@ func (s *accountService) RenewAccountWithOptions(ctx context.Context, protocol, 
 
 	if protocol == "ssh" && !skipSystemUserProvision() {
 		expiryStr := account.ExpiredAt.Format("2006-01-02")
-		nologin := "/usr/sbin/nologin"
-		if _, err := os.Stat(nologin); err != nil {
-			nologin = "/bin/false"
-		}
-		_ = exec.CommandContext(ctx, "usermod", "-s", nologin, "-e", expiryStr, "-U", username).Run()
+		_ = s.shadowMutator.WithLock(func(nologin string) error {
+			_ = exec.CommandContext(ctx, "usermod", "-s", nologin, "-e", expiryStr, "-U", username).Run()
+			return nil
+		})
 	} else if protocol == "noobz" {
+		s.noobzMu.Lock()
 		_ = exec.CommandContext(ctx, "noobzvpns", "unblock", username).Run()
 		_ = exec.CommandContext(ctx, "noobzvpns", "edit", username, "-e", strconv.Itoa(days)).Run()
+		s.noobzMu.Unlock()
 	} else if wasInactive && (protocol == "vless" || protocol == "vmess" || protocol == "trojan") {
 		_ = s.xrayMutator.AddClientsBatch(ctx, protocol, []XrayClientSpec{{Username: username, Secret: account.Secret}})
 	}
@@ -874,18 +883,38 @@ func (s *accountService) RenewBulkAccounts(ctx context.Context, protocol string,
 		}
 		_ = s.xrayMutator.AddClientsBatch(ctx, protocol, specs)
 	} else if protocol == "ssh" && !skipSystemUserProvision() {
-		nologin := "/usr/sbin/nologin"
-		if _, err := os.Stat(nologin); err != nil {
-			nologin = "/bin/false"
-		}
-		for _, acc := range updated {
-			_ = exec.CommandContext(ctx, "usermod", "-s", nologin, "-e", acc.ExpiredAt.Format("2006-01-02"), "-U", acc.Username).Run()
-		}
+		_ = s.shadowMutator.WithLock(func(nologin string) error {
+			for _, acc := range updated {
+				_ = exec.CommandContext(ctx, "usermod", "-s", nologin, "-e", acc.ExpiredAt.Format("2006-01-02"), "-U", acc.Username).Run()
+			}
+			return nil
+		})
 	}
 
 	_ = s.repo.WriteAuditLog(ctx, "api", "bulk_renew", protocol, fmt.Sprintf("batch(%d)", len(updated)), fmt.Sprintf("+%dd", days))
 	s.invalidateCaches()
 	return updated, nil
+}
+
+// RenewUserAutoDetect automatically detects which protocol(s) username belongs to and extends expiry.
+func (s *accountService) RenewUserAutoDetect(ctx context.Context, username string, days int, resetQuota bool) ([]*model.Account, error) {
+	accounts, err := s.repo.GetByUsernameAllProtocols(ctx, username)
+	if err != nil {
+		return nil, err
+	}
+	if len(accounts) == 0 {
+		return nil, model.ErrAccountNotFound
+	}
+
+	renewed := make([]*model.Account, 0, len(accounts))
+	for _, acc := range accounts {
+		upd, err := s.RenewAccountWithOptions(ctx, acc.Protocol, username, days, resetQuota)
+		if err != nil {
+			return renewed, err
+		}
+		renewed = append(renewed, upd)
+	}
+	return renewed, nil
 }
 
 // SuspendAccount suspends an active account, removes/locks access, and disconnects its live sessions.
@@ -901,10 +930,15 @@ func (s *accountService) SuspendAccount(ctx context.Context, protocol, username,
 	if protocol == "vless" || protocol == "vmess" || protocol == "trojan" {
 		_ = s.xrayMutator.RemoveClientsBatch(ctx, protocol, []string{username})
 	} else if protocol == "ssh" && !skipSystemUserProvision() {
-		_ = exec.CommandContext(ctx, "usermod", "-L", "-e", "1", username).Run()
+		_ = s.shadowMutator.WithLock(func(_ string) error {
+			_ = exec.CommandContext(ctx, "usermod", "-L", "-e", "1", username).Run()
+			return nil
+		})
 		_, _ = s.killSSHUserProcesses(ctx, username)
 	} else if protocol == "noobz" {
+		s.noobzMu.Lock()
 		_ = exec.CommandContext(ctx, "noobzvpns", "block", username).Run()
+		s.noobzMu.Unlock()
 	}
 
 	acc.Status = "suspended"
@@ -990,25 +1024,25 @@ func (s *accountService) RecoverAccount(ctx context.Context, protocol, username 
 			return fmt.Errorf("re-add xray client: %w", err)
 		}
 	} else if protocol == "ssh" && !skipSystemUserProvision() {
-		nologin := "/usr/sbin/nologin"
-		if _, err := os.Stat(nologin); err != nil {
-			nologin = "/bin/false"
-		}
 		expiryStr := account.ExpiredAt.Format("2006-01-02")
-		if exec.CommandContext(ctx, "id", username).Run() != nil {
-			userAddCmd := exec.CommandContext(ctx, "useradd", "-e", expiryStr, "-M", "-N", "-s", nologin, username)
-			if output, err := userAddCmd.CombinedOutput(); err != nil {
-				return fmt.Errorf("re-create system user: %s: %w", strings.TrimSpace(string(output)), err)
+		if err := s.shadowMutator.WithLock(func(nologin string) error {
+			if exec.CommandContext(ctx, "id", username).Run() != nil {
+				userAddCmd := exec.CommandContext(ctx, "useradd", "-e", expiryStr, "-M", "-N", "-s", nologin, username)
+				if output, err := userAddCmd.CombinedOutput(); err != nil {
+					return fmt.Errorf("re-create system user: %s: %w", strings.TrimSpace(string(output)), err)
+				}
+				if output, err := runChpasswdBulk(ctx, fmt.Sprintf("%s:%s\n", username, account.Secret)); err != nil {
+					return fmt.Errorf("set password for recovered user: %s: %w", strings.TrimSpace(string(output)), err)
+				}
+			} else {
+				_ = exec.CommandContext(ctx, "usermod", "-U", "-s", nologin, "-e", expiryStr, username).Run()
 			}
-			chpasswdCmd := exec.CommandContext(ctx, "chpasswd")
-			chpasswdCmd.Stdin = strings.NewReader(fmt.Sprintf("%s:%s\n", username, account.Secret))
-			if output, err := chpasswdCmd.CombinedOutput(); err != nil {
-				return fmt.Errorf("set password for recovered user: %s: %w", strings.TrimSpace(string(output)), err)
-			}
-		} else {
-			_ = exec.CommandContext(ctx, "usermod", "-U", "-s", nologin, "-e", expiryStr, username).Run()
+			return nil
+		}); err != nil {
+			return err
 		}
 	} else if protocol == "noobz" {
+		s.noobzMu.Lock()
 		if exec.CommandContext(ctx, "noobzvpns", "unblock", username).Run() != nil {
 			days := int(time.Until(account.ExpiredAt).Hours() / 24)
 			if days <= 0 {
@@ -1025,6 +1059,7 @@ func (s *accountService) RecoverAccount(ctx context.Context, protocol, username 
 			}
 			_ = exec.CommandContext(ctx, "noobzvpns", args...).Run()
 		}
+		s.noobzMu.Unlock()
 	}
 
 	account.Status = "active"
@@ -1073,9 +1108,10 @@ func (s *accountService) UpdateAccount(ctx context.Context, protocol, username s
 	if protocol == "ssh" && req.Password != "" {
 		account.Secret = req.Password
 		if !skipSystemUserProvision() {
-			ch := exec.CommandContext(ctx, "chpasswd")
-			ch.Stdin = strings.NewReader(fmt.Sprintf("%s:%s\n", username, req.Password))
-			_ = ch.Run()
+			_ = s.shadowMutator.WithLock(func(_ string) error {
+				_, _ = runChpasswdBulk(ctx, fmt.Sprintf("%s:%s\n", username, req.Password))
+				return nil
+			})
 		}
 	} else if protocol == "noobz" {
 		args := []string{"edit", username}
@@ -1093,7 +1129,9 @@ func (s *accountService) UpdateAccount(ctx context.Context, protocol, username s
 			args = append(args, "-p", req.Password)
 		}
 		if len(args) > 2 {
+			s.noobzMu.Lock()
 			_ = exec.CommandContext(ctx, "noobzvpns", args...).Run()
+			s.noobzMu.Unlock()
 		}
 	}
 

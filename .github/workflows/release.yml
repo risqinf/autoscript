@@ -1,4 +1,4 @@
-name: Release Autoscript & API
+name: Release Autoscript & Prebuilt Binaries
 
 on:
   push:
@@ -7,7 +7,7 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: 'Tag to release (e.g. v5.5.0)'
+        description: 'Tag to release (e.g. v5.6.0)'
         required: true
         type: string
       prerelease:
@@ -35,7 +35,7 @@ permissions:
 
 jobs:
   # ───────────────────────────────────────────────────────────────────────────
-  #  1 · Prepare
+  #  1 · Prepare Metadata & Release Notes
   # ───────────────────────────────────────────────────────────────────────────
   prepare:
     name: Prepare
@@ -69,13 +69,9 @@ jobs:
             IS_PRE="true"
           fi
 
-          echo "tag=${TAG}"             >> "$GITHUB_OUTPUT"
-          echo "version=${VERSION}"     >> "$GITHUB_OUTPUT"
+          echo "tag=${TAG}"              >> "$GITHUB_OUTPUT"
+          echo "version=${VERSION}"      >> "$GITHUB_OUTPUT"
           echo "is_prerelease=${IS_PRE}" >> "$GITHUB_OUTPUT"
-
-          echo "Tag     : ${TAG}"
-          echo "Version : ${VERSION}"
-          echo "Pre-rel : ${IS_PRE}"
 
       - name: Generate changelog file
         id: changelog
@@ -87,11 +83,11 @@ jobs:
             echo "## Autoscript Enterprise Release ${TAG}"
             echo ""
             echo "### Highlights"
-            echo "- **5-Layer Strict SHA-256 + Canonical HMAC-SHA256 API Verification** + Mutual Response Signatures"
-            echo "- **SSH All-Protocol Quota & Live Session Engine** (OpenSSH, Dropbear, Direct SSH SSL/TLS, SSH-WS, SlowDNS, OpenVPN)"
-            echo "- **Real-Time Accessed Apps/Domains, Transport Protocol, ISP & GeoIP Telemetry**"
-            echo "- **Flash-Sale Bulk Engine on Standard Endpoints** (\`POST /api/accounts/{protocol}\`: 1 up to 1,000 accounts in 1 request with single-pass Xray JSON + WAL batch + Idempotency)"
-            echo "- **Extreme Rocky Linux 9 Optimization** (1 vCPU / 1 GB RAM ready, ZRAM, BBR, SELinux & Firewalld auto-healing)"
+            echo "- **Prebuilt Hardened Binaries (Zero VPS Compile Time)**: Static \`Dropbear 2019.78\` (\`dropbear\` + \`dropbearkey\` with EL9 \`\$6\$\` SHA-512 & EL10 \`\$y\$\` YESCRYPT + SSRF/IMDS guard + shadow expiry enforcement), \`dnstt-server\` (SlowDNS), and \`autoscript-api\` (\`amd64\` & \`arm64\`)"
+            echo "- **Multi-Distro Enterprise Linux 9 & 10 Support**: Rocky Linux 9–10, RHEL 9–10, AlmaLinux 9–10, Oracle Linux 9–10"
+            echo "- **Zero-Downtime High-Concurrency Order Engine**: Group-commit Xray config coalescing, cross-process \`flock\` batch \`/etc/shadow\` mutator, and SQLite WAL \`busy_timeout(15000)\` handle 100+ simultaneous orders without lock contention"
+            echo "- **Complete Standard REST Endpoints**: Create (single & Flash-Sale bulk), Delete, Renew, and Auto-Detect User Login (\`GET /api/users/{username}/login\` & \`GET /api/users/{username}\`) across all SSH/OpenVPN/Xray/NoobzVPN protocols"
+            echo "- **5-Layer Strict SHA-256 + Canonical HMAC-SHA256 API Security** + Mutual Response Signatures"
             echo ""
             echo "### Commits & Changes"
             if [[ -n "$PREV" ]]; then
@@ -105,21 +101,25 @@ jobs:
             fi
             echo ""
             echo "---"
-            echo "### Installation & Update"
+            echo "### Installation & Update (EL9 & EL10)"
             echo "\`\`\`bash"
-            echo "# Run Full Installer (Rocky Linux 9)"
+            echo "# Full Enterprise Installer (Rocky / RHEL / AlmaLinux / Oracle Linux 9 & 10)"
             echo "curl -fsSL --proto '=https' --tlsv1.2 https://raw.githubusercontent.com/${{ github.repository }}/main/install.sh | bash"
             echo ""
-            echo "# Standalone API Server Installer / Updater (auto-verifies SHA-256)"
+            echo "# Standalone API Server Installer / Updater (SHA-256 verified)"
             echo "curl -fsSL --proto '=https' --tlsv1.2 https://raw.githubusercontent.com/${{ github.repository }}/main/install-api.sh | bash"
             echo "\`\`\`"
             echo ""
             echo "### Prebuilt Release Binaries"
-            echo "| Platform | Archive | Checksum |"
-            echo "|----------|---------|----------|"
-            echo "| Linux amd64 | \`${{ env.APP_NAME }}-${TAG}-linux-amd64.tar.gz\` | \`${{ env.APP_NAME }}-${TAG}-linux-amd64.sha256\` |"
-            echo "| Linux arm64 | \`${{ env.APP_NAME }}-${TAG}-linux-arm64.tar.gz\` | \`${{ env.APP_NAME }}-${TAG}-linux-arm64.sha256\` |"
-            echo "| Linux armv7 | \`${{ env.APP_NAME }}-${TAG}-linux-armv7.tar.gz\` | \`${{ env.APP_NAME }}-${TAG}-linux-armv7.sha256\` |"
+            echo "| Component | Platform | Archive | Checksum |"
+            echo "|-----------|----------|---------|----------|"
+            echo "| Autoscript API | Linux amd64 | \`${{ env.APP_NAME }}-${TAG}-linux-amd64.tar.gz\` | \`${{ env.APP_NAME }}-${TAG}-linux-amd64.sha256\` |"
+            echo "| Autoscript API | Linux arm64 | \`${{ env.APP_NAME }}-${TAG}-linux-arm64.tar.gz\` | \`${{ env.APP_NAME }}-${TAG}-linux-arm64.sha256\` |"
+            echo "| Autoscript API | Linux armv7 | \`${{ env.APP_NAME }}-${TAG}-linux-armv7.tar.gz\` | \`${{ env.APP_NAME }}-${TAG}-linux-armv7.sha256\` |"
+            echo "| Dropbear 2019.78 (Hardened Static) | Linux amd64 | \`dropbear-2019.78-linux-amd64.tar.gz\` | \`dropbear-2019.78-linux-amd64.sha256\` |"
+            echo "| Dropbear 2019.78 (Hardened Static) | Linux arm64 | \`dropbear-2019.78-linux-arm64.tar.gz\` | \`dropbear-2019.78-linux-arm64.sha256\` |"
+            echo "| SlowDNS (dnstt-server Static) | Linux amd64 | \`dnstt-server-linux-amd64.tar.gz\` | \`dnstt-server-linux-amd64.sha256\` |"
+            echo "| SlowDNS (dnstt-server Static) | Linux arm64 | \`dnstt-server-linux-arm64.tar.gz\` | \`dnstt-server-linux-arm64.sha256\` |"
           } > release-body.md
 
           mkdir -p release-meta
@@ -132,7 +132,7 @@ jobs:
           retention-days: 1
 
   # ───────────────────────────────────────────────────────────────────────────
-  #  2 · Build API Binary Matrix
+  #  2 · Build API Binary Matrix (amd64, arm64, armv7)
   # ───────────────────────────────────────────────────────────────────────────
   build:
     name: Build API (${{ matrix.label }})
@@ -200,18 +200,120 @@ jobs:
 
       - uses: actions/upload-artifact@v4
         with:
-          name: release-${{ matrix.label }}
+          name: release-api-${{ matrix.label }}
           path: |
             dist/${{ steps.archive.outputs.archive }}
             dist/${{ steps.build.outputs.output }}.sha256
           retention-days: 1
 
   # ───────────────────────────────────────────────────────────────────────────
-  #  3 · Publish Release
+  #  3 · Build Prebuilt Hardened Static Dropbear 2019.78 (amd64 & arm64)
+  # ───────────────────────────────────────────────────────────────────────────
+  build-dropbear:
+    name: Build Dropbear 2019.78 (${{ matrix.label }})
+    needs: prepare
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: linux/amd64
+            label: linux-amd64
+          - platform: linux/arm64
+            label: linux-arm64
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up QEMU for multi-arch static build
+        if: matrix.platform != 'linux/amd64'
+        uses: docker/setup-qemu-action@v3
+
+      - name: Build Static Hardened Dropbear 2019.78
+        run: |
+          mkdir -p "${GITHUB_WORKSPACE}/dist-dropbear"
+          docker run --rm \
+            --platform "${{ matrix.platform }}" \
+            -v "${GITHUB_WORKSPACE}:/work" \
+            -w /work \
+            alpine:3.20 \
+            sh -euxc "apk add --no-cache bash && bash /work/scripts/build/build-dropbear-2019.sh '${{ matrix.label }}' '/work/dist-dropbear'"
+          ls -lh "${GITHUB_WORKSPACE}/dist-dropbear"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-dropbear-${{ matrix.label }}
+          path: |
+            dist-dropbear/dropbear-2019.78-${{ matrix.label }}.tar.gz
+            dist-dropbear/dropbear-2019.78-${{ matrix.label }}.sha256
+          retention-days: 1
+
+  # ───────────────────────────────────────────────────────────────────────────
+  #  4 · Build Prebuilt Static SlowDNS dnstt-server (amd64 & arm64)
+  # ───────────────────────────────────────────────────────────────────────────
+  build-dnstt:
+    name: Build SlowDNS dnstt-server (${{ matrix.label }})
+    needs: prepare
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - goarch: amd64
+            label: linux-amd64
+          - goarch: arm64
+            label: linux-arm64
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: 'files/go.mod'
+
+      - name: Clone & Build Static dnstt-server
+        env:
+          CGO_ENABLED: 0
+          GOOS: linux
+          GOARCH: ${{ matrix.goarch }}
+        run: |
+          mkdir -p dist-dnstt/stage
+          TMP_SRC="$(mktemp -d)"
+          git clone --depth 1 https://www.bamsoftware.com/git/dnstt.git "${TMP_SRC}/dnstt" || \
+            git clone --depth 1 https://github.com/Mygod/dnstt.git "${TMP_SRC}/dnstt"
+
+          (
+            cd "${TMP_SRC}/dnstt/dnstt-server"
+            go build -trimpath -ldflags="-s -w" -o "${GITHUB_WORKSPACE}/dist-dnstt/stage/dnstt-server"
+          )
+          rm -rf "${TMP_SRC}"
+
+          chmod 0755 dist-dnstt/stage/dnstt-server
+          (
+            cd dist-dnstt/stage
+            sha256sum dnstt-server > SHA256SUMS
+            tar -czf "../dnstt-server-${{ matrix.label }}.tar.gz" dnstt-server SHA256SUMS
+          )
+          (
+            cd dist-dnstt
+            sha256sum "dnstt-server-${{ matrix.label }}.tar.gz" | tee "dnstt-server-${{ matrix.label }}.sha256"
+            ls -lh "dnstt-server-${{ matrix.label }}.tar.gz" "dnstt-server-${{ matrix.label }}.sha256"
+          )
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-dnstt-${{ matrix.label }}
+          path: |
+            dist-dnstt/dnstt-server-${{ matrix.label }}.tar.gz
+            dist-dnstt/dnstt-server-${{ matrix.label }}.sha256
+          retention-days: 1
+
+  # ───────────────────────────────────────────────────────────────────────────
+  #  5 · Publish GitHub Release with All Prebuilt Binaries & Checksums
   # ───────────────────────────────────────────────────────────────────────────
   release:
     name: Publish Release
-    needs: [prepare, build]
+    needs: [prepare, build, build-dropbear, build-dnstt]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -225,7 +327,7 @@ jobs:
       - name: Merge Checksums
         run: |
           find release-assets -name "*.sha256" -exec cat {} \; \
-            | sort > release-assets/checksums.txt
+            | sort -u > release-assets/checksums.txt
           cat release-assets/checksums.txt
 
       - name: Publish with GitHub CLI
@@ -250,7 +352,7 @@ jobs:
               --clobber
           else
             gh release create "${TAG}" \
-              --title "Autoscript & API ${TAG}" \
+              --title "Autoscript & Prebuilt Binaries ${TAG}" \
               --notes-file release-assets/release-body.md \
               $FLAGS \
               release-assets/*.tar.gz \
@@ -259,11 +361,11 @@ jobs:
           fi
 
   # ───────────────────────────────────────────────────────────────────────────
-  #  4 · Update VERSION file in repository
+  #  6 · Sync VERSION & Prebuilt Binaries into bin/ on main
   # ───────────────────────────────────────────────────────────────────────────
   update-version:
-    name: Update VERSION
-    needs: [prepare, release]
+    name: Sync VERSION & bin/
+    needs: [prepare, build-dropbear, build-dnstt, release]
     runs-on: ubuntu-latest
     if: ${{ needs.prepare.outputs.is_prerelease == 'false' && github.event.inputs.draft != 'true' }}
     steps:
@@ -273,7 +375,19 @@ jobs:
           ref: main
           fetch-depth: 1
 
-      - name: Write VERSION & commit
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: release-dropbear-*
+          path: bin
+          merge-multiple: true
+
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: release-dnstt-*
+          path: bin
+          merge-multiple: true
+
+      - name: Write VERSION & sync prebuilt bin/
         env:
           TAG: ${{ needs.prepare.outputs.tag }}
           VERSION: ${{ needs.prepare.outputs.version }}
@@ -283,8 +397,14 @@ jobs:
           GIT_COMMITTER_EMAIL: github-actions[bot]@users.noreply.github.com
         run: |
           echo "${VERSION}" > VERSION
-          git add VERSION
-          git diff --cached --quiet && echo "VERSION unchanged, skipping commit." && exit 0
-          git commit -m "chore: bump VERSION to ${TAG} [skip ci]"
+          mkdir -p bin
+          (
+            cd bin
+            cat *.sha256 | sort -u > checksums.txt
+            ls -lh
+          )
+          git add -f VERSION bin/
+          git diff --cached --quiet && echo "No changes to VERSION or bin/, skipping commit." && exit 0
+          git commit -m "chore: bump VERSION and sync prebuilt binaries for ${TAG} [skip ci]"
           git push origin main
-          echo "VERSION updated to ${VERSION} and pushed to main."
+          echo "VERSION (${VERSION}) and prebuilt bin/ synced to main."

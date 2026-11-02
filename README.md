@@ -1,14 +1,19 @@
 # Autoscript VPN
 
-> Version: **5.5.0** (Enterprise Release) — see [CHANGELOG.md](CHANGELOG.md).
+> Version: **5.6.0** (Enterprise Release — EL9 & EL10) — see [CHANGELOG.md](CHANGELOG.md).
 
-AutoScript VPN & Tunneling Management System, engineered and extremized for **Rocky Linux 9**.
+AutoScript VPN & Tunneling Management System, engineered and extremized for **Enterprise Linux 9 & 10** (**Rocky Linux 9–10**, **RHEL 9–10**, **AlmaLinux 9–10**, **Oracle Linux 9–10**).
 
-Enterprise-grade multi-protocol tunneling platform supporting **SSH All-Protocol** (OpenSSH, Dropbear, Direct SSH SSL/TLS, SSH-WS, SlowDNS DNSTT, OpenVPN), **NoobzVPN**, **VLESS**, **VMESS**, and **Trojan** with full WebSocket (`ws`), HTTPUpgrade (`hu`), XHTTP (`xhttp`), and gRPC transport matrix, fronted by HAProxy + Nginx HTTP/1.1 & HTTP/2, extreme 1 vCPU / 1 GB RAM Rocky Linux kernel/ZRAM optimization, and a million-request-ready **Go RESTful API daemon** protected by **5-Layer Strict SHA-256 + Canonical HMAC-SHA256 verification**.
+Enterprise-grade multi-protocol tunneling platform supporting **SSH All-Protocol** (OpenSSH, Prebuilt Hardened Dropbear 2019.78, Direct SSH SSL/TLS, SSH-WS, Prebuilt SlowDNS DNSTT, OpenVPN), **NoobzVPN**, **VLESS**, **VMESS**, and **Trojan** with full WebSocket (`ws`), HTTPUpgrade (`hu`), XHTTP (`xhttp`), and gRPC transport matrix, fronted by HAProxy + Nginx HTTP/1.1 & HTTP/2, extreme 1 vCPU / 1 GB RAM kernel/ZRAM optimization, and a zero-downtime high-concurrency **Go RESTful API daemon** protected by **5-Layer Strict SHA-256 + Canonical HMAC-SHA256 verification**.
 
 ---
 
-## Key Features (v5.5.0)
+## Key Features (v5.6.0)
+
+- **Prebuilt Hardened Binaries (Zero VPS Compile Time)**: Ships cryptographically SHA-256-verified static binaries for **`Dropbear 2019.78`** (`dropbear` + `dropbearkey` linked with static `libxcrypt` supporting both EL9 `$6$` SHA-512 and EL10 `$y$` YESCRYPT, compile-time SSRF/IMDS/loopback isolation, and real-time `/etc/shadow` `sp_expire` enforcement), **`dnstt-server`** (SlowDNS), and **`autoscript-api`** (`linux-amd64` & `linux-arm64`) — installs in ~1–2 seconds without installing GCC or Go on the VPS.
+- **Multi-Distro Enterprise Linux 9 & 10 Support**: Native support across **Rocky Linux 9–10**, **RHEL 9–10**, **AlmaLinux 9–10**, and **Oracle Linux 9–10** (`x86_64` & `aarch64`), automatically configuring CRB / CodeReady Builder + EPEL 9/10 across DNF4 and DNF5.
+- **Zero-Downtime Simultaneous Order Burst Engine**: Handles **100+ simultaneous buyer orders** at the exact same millisecond with zero `SQLITE_BUSY`, zero `/etc/passwd` lock failures, and zero Xray restart storms via **Leader-Follower Group-Commit Xray Write Coalescing**, **Cross-Process `flock` Batch `/etc/shadow` Mutation**, **DB-First Atomic Reservation**, and **SQLite WAL `busy_timeout(15000)`**.
+- **Complete Standard REST Endpoints & Auto-Detect User Login**: Full Create (`POST /api/accounts/{protocol}`, `POST /api/accounts`), Delete (`DELETE /api/accounts/{protocol}/{username}`, `DELETE /api/users/{username}`), Renew (`POST /api/accounts/{protocol}/{username}/renew`, `POST /api/users/{username}/renew`), and **Auto-Detect User Login & All Information** (`GET /api/users/{username}/login`, `GET /api/users/{username}`) returning online state, auto-detected protocol(s), transport, IPs, ISP, GeoIP, accessed apps/domains, quota breakdown, and connection `config` links.
 
 - **SSH All-Protocol Quota & Live Session Engine**: Tracks and enforces bandwidth quota across **OpenSSH (`22, 3303`)**, **Dropbear (`109, 143`)**, **Direct SSH SSL/TLS (`443, 8443`)**, **SSH WebSocket (`80, 8080, 8888, 443`)**, **SlowDNS (`53, 5300` UDP)**, and **OpenVPN (`1194` TCP)** via monotonic kernel TCP byte accounting (`loop-quota-ssh.service` + `ssh_proto_usage` SQLite WAL table).
 - **Real-Time Accessed Apps/Domains, Protocol, ISP & GeoIP Telemetry**: Inspect live connected users with automatic classification of **65+ apps/domains** (*YouTube, Netflix, TikTok, Instagram, WhatsApp, Telegram, ChatGPT/OpenAI, Mobile Legends, Shopee*, etc.), exact transport protocol, ISP/ASN, and GeoIP city/country via 3-tier free GeoIP APIs (`ip-api.com` -> `ipwho.is` -> `freeipapi.com` with 24h caching).
@@ -51,15 +56,21 @@ Enterprise-grade multi-protocol tunneling platform supporting **SSH All-Protocol
 
 ## Installation
 
-### Requirements
-- **OS**: Rocky Linux 9 (`x86_64` or `aarch64`)
+### Supported Operating Systems & Requirements
+| Distribution | Supported Versions | Architectures |
+|---|---|---|
+| **Rocky Linux** | `9.x`, `10.x` | `x86_64` (`amd64`), `aarch64` (`arm64`) |
+| **Red Hat Enterprise Linux (RHEL)** | `9.x`, `10.x` | `x86_64` (`amd64`), `aarch64` (`arm64`) |
+| **AlmaLinux** | `9.x`, `10.x` | `x86_64` (`amd64`), `aarch64` (`arm64`) |
+| **Oracle Linux** | `9.x`, `10.x` | `x86_64` (`amd64`), `aarch64` (`arm64`) |
+
 - **Minimum Specs**: 1 vCPU / 1 GB RAM (supports hundreds of concurrent users with `1GB-EXTREME` profile)
 - **Privileges**: Root (`sudo -i`)
 - **DNS**: Domain / subdomain A record pointed to server IP
 
-### 1-Line Installation Command
+### 1-Line Installation Command (EL9 & EL10)
 ```bash
-dnf install epel-release -y && dnf install wget curl openssl screen -y && mkdir -p /run/screen && chmod 700 /run/screen && curl -fsSL --proto '=https' --tlsv1.2 -o install.sh https://raw.githubusercontent.com/risqinf/autoscript/main/install.sh && chmod +x install.sh && screen -S autoscript ./install.sh
+dnf install -y wget curl openssl && curl -fsSL --proto '=https' --tlsv1.2 -o install.sh https://raw.githubusercontent.com/risqinf/autoscript/main/install.sh && chmod +x install.sh && ./install.sh
 ```
 
 ### Standalone API Server Install / Upgrade

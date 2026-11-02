@@ -79,7 +79,9 @@ acc_xray_renew() {
   return 0
 }
 
-# ---- SSH ACCOUNTS ----
+# ---- SSH ACCOUNTS (Cross-Process flock Coordinated with Go API ShadowMutator) ----
+export AS_SHADOW_LOCK="/run/autoscript-shadow.lock"
+
 acc_ssh_create() {
   local user="$1" pass="$2" limit_ip="$3" days="$4" quota_gb="${5:-0}"
   local exp_epoch exp_system quota_bytes=0
@@ -94,8 +96,19 @@ acc_ssh_create() {
   fi
   local nologin
   nologin=$(ensure_nologin_shell); [[ -z "$nologin" ]] && nologin=/usr/sbin/nologin
-  useradd -e "$exp_system" -M -N -s "$nologin" "$user" || { err "useradd failed"; return 1; }
-  echo "${user}:${pass}" | chpasswd || { userdel --force "$user" >/dev/null 2>&1; err "chpasswd failed"; return 1; }
+
+  local lock_rc=0
+  (
+    flock -w 30 9 || exit 1
+    useradd -e "$exp_system" -M -N -s "$nologin" "$user" || exit 1
+    if ! printf '%s:%s\n' "$user" "$pass" | chpasswd -c SHA512 2>/dev/null; then
+      printf '%s:%s\n' "$user" "$pass" | chpasswd || { userdel --force "$user" >/dev/null 2>&1 || true; exit 1; }
+    fi
+  ) 9>"$AS_SHADOW_LOCK" || lock_rc=$?
+
+  if (( lock_rc != 0 )); then
+    err "useradd/chpasswd failed"; return 1
+  fi
   db_insert_account "ssh" "$user" "$pass" "$quota_bytes" "$limit_ip" "$exp_epoch"
   db_audit "create" "ssh" "$user" "ip=${limit_ip} days=${days} quota=${quota_gb}GB"
   return 0
@@ -137,7 +150,10 @@ acc_ssh_delete() {
   local user="$1"
   db_account_exists "ssh" "$user" || { err "account not found"; return 4; }
   acc_ssh_kill_user "$user"
-  id "$user" &>/dev/null && userdel --force "$user" >/dev/null 2>&1
+  (
+    flock -w 30 9 || exit 0
+    id "$user" &>/dev/null && userdel --force "$user" >/dev/null 2>&1 || true
+  ) 9>"$AS_SHADOW_LOCK"
   db_set_status "ssh" "$user" "deleted"
   db_audit "delete" "ssh" "$user" ""
   return 0
@@ -146,10 +162,13 @@ acc_ssh_delete() {
 acc_ssh_suspend() {
   local user="$1" reason="${2:-quota}"
   db_account_exists "ssh" "$user" || return 4
-  if id "$user" &>/dev/null; then
-    usermod -L "$user" >/dev/null 2>&1 || true
-    chage -E 0 "$user" >/dev/null 2>&1 || true
-  fi
+  (
+    flock -w 30 9 || exit 0
+    if id "$user" &>/dev/null; then
+      usermod -L "$user" >/dev/null 2>&1 || true
+      chage -E 0 "$user" >/dev/null 2>&1 || true
+    fi
+  ) 9>"$AS_SHADOW_LOCK"
   acc_ssh_kill_user "$user"
   db_set_status "ssh" "$user" "suspended"
   db_audit "suspend" "ssh" "$user" "$reason"
@@ -161,10 +180,13 @@ acc_ssh_unsuspend() {
   local exp_epoch
   exp_epoch=$(db_query "SELECT expired_at FROM accounts WHERE protocol='ssh' AND username='$(sql_escape "$user")' AND status!='deleted' LIMIT 1;")
   [[ -z "$exp_epoch" ]] && return 4
-  if id "$user" &>/dev/null; then
-    usermod -U "$user" >/dev/null 2>&1 || true
-    chage -E "$(date -d "@${exp_epoch}" +%Y-%m-%d)" "$user" >/dev/null 2>&1 || true
-  fi
+  (
+    flock -w 30 9 || exit 0
+    if id "$user" &>/dev/null; then
+      usermod -U "$user" >/dev/null 2>&1 || true
+      chage -E "$(date -d "@${exp_epoch}" +%Y-%m-%d)" "$user" >/dev/null 2>&1 || true
+    fi
+  ) 9>"$AS_SHADOW_LOCK"
   db_set_status "ssh" "$user" "active"
   db_audit "unsuspend" "ssh" "$user" ""
   return 0
@@ -179,10 +201,13 @@ acc_ssh_renew() {
   base=$cur; (( cur < now )) && base=$now
   new=$(( base + days * 86400 ))
   db_set_expired "ssh" "$user" "$new"
-  if id "$user" &>/dev/null; then
-    usermod -U "$user" 2>/dev/null || true
-    chage -E "$(date -d "@${new}" +%Y-%m-%d)" "$user" 2>/dev/null
-  fi
+  (
+    flock -w 30 9 || exit 0
+    if id "$user" &>/dev/null; then
+      usermod -U "$user" 2>/dev/null || true
+      chage -E "$(date -d "@${new}" +%Y-%m-%d)" "$user" 2>/dev/null || true
+    fi
+  ) 9>"$AS_SHADOW_LOCK"
   db_audit "renew" "ssh" "$user" "+${days}d"
   echo "$new"
   return 0

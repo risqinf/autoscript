@@ -22,6 +22,10 @@ backup-*.zip
 *.tar
 *.tar.gz
 *.tar.bz2
+!bin/
+!bin/*.tar.gz
+!bin/*.sha256
+!bin/checksums.txt
 api-tester/*
 main.zip
 

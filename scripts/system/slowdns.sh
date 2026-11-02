@@ -87,8 +87,9 @@ slowdns_setup_service() {
   cat > "$SLOWDNS_SERVICE" <<EOF
 [Unit]
 Description=SlowDNS (DNSTT) Tunnel Server
-After=network.target
+After=network.target dropbear.service
 Documentation=https://github.com/risqinf/autoscript
+StartLimitIntervalSec=0
 
 [Service]
 Type=simple
@@ -98,7 +99,8 @@ AmbientCapabilities=CAP_NET_ADMIN CAP_NET_BIND_SERVICE
 NoNewPrivileges=true
 ExecStart=${SLOWDNS_BIN} -udp :5300 -privkey-file ${SLOWDNS_KEY} ${ns} 127.0.0.1:109
 Restart=always
-RestartSec=3
+RestartSec=1s
+LimitNOFILE=262144
 
 [Install]
 WantedBy=multi-user.target
@@ -116,10 +118,65 @@ slowdns_install() {
   mkdir -p "$SLOWDNS_DIR"
   chmod 700 "$SLOWDNS_DIR"
 
-  # 1. Build verified binary from official upstream source (zero unverified binary blobs)
+  # 1. Try prebuilt SHA-256-verified dnstt-server binary first (zero Go compile needed on VPS)
+  if [[ ! -x "$SLOWDNS_BIN" ]]; then
+    local arch_label=""
+    case "$(uname -m)" in
+      x86_64|amd64)  arch_label="linux-amd64" ;;
+      aarch64|arm64) arch_label="linux-arm64" ;;
+    esac
+
+    if [[ -n "$arch_label" ]]; then
+      local arc_name="dnstt-server-${arch_label}.tar.gz"
+      local sha_name="dnstt-server-${arch_label}.sha256"
+      local pre_tmp
+      pre_tmp="$(mktemp -d /tmp/dnstt-prebuilt.XXXXXX)"
+      chmod 700 "$pre_tmp"
+
+      local -a sources=(
+        "/usr/local/share/autoscript/bin/${arc_name}|/usr/local/share/autoscript/bin/${sha_name}"
+        "https://github.com/risqinf/autoscript/releases/latest/download/${arc_name}|https://github.com/risqinf/autoscript/releases/latest/download/${sha_name}"
+        "https://raw.githubusercontent.com/risqinf/autoscript/main/bin/${arc_name}|https://raw.githubusercontent.com/risqinf/autoscript/main/bin/${sha_name}"
+      )
+
+      local pair s_arc s_sha exp_h act_h
+      for pair in "${sources[@]}"; do
+        s_arc="${pair%%|*}"
+        s_sha="${pair#*|}"
+        rm -f "${pre_tmp}/${arc_name}" "${pre_tmp}/${sha_name}"
+        if [[ "$s_arc" == http* ]]; then
+          info "Downloading prebuilt SlowDNS binary (${arch_label})..."
+          curl -fsSL --proto '=https' --tlsv1.2 --connect-timeout 10 --max-time 60 \
+            -o "${pre_tmp}/${arc_name}" "$s_arc" 2>/dev/null || continue
+          curl -fsSL --proto '=https' --tlsv1.2 --connect-timeout 10 --max-time 30 \
+            -o "${pre_tmp}/${sha_name}" "$s_sha" 2>/dev/null || continue
+        else
+          [[ -s "$s_arc" && -s "$s_sha" ]] || continue
+          cp -f "$s_arc" "${pre_tmp}/${arc_name}"
+          cp -f "$s_sha" "${pre_tmp}/${sha_name}"
+        fi
+
+        exp_h=$(awk '{print $1; exit}' "${pre_tmp}/${sha_name}" | tr -d '[:space:]')
+        act_h=$(sha256sum "${pre_tmp}/${arc_name}" | awk '{print $1}')
+        if [[ -n "$exp_h" && "$exp_h" == "$act_h" ]]; then
+          mkdir -p "${pre_tmp}/extract"
+          if tar -xzf "${pre_tmp}/${arc_name}" -C "${pre_tmp}/extract" 2>/dev/null && \
+             (cd "${pre_tmp}/extract" && [[ -s SHA256SUMS ]] && sha256sum -c SHA256SUMS >/dev/null 2>&1) && \
+             [[ -f "${pre_tmp}/extract/dnstt-server" ]]; then
+            install -m 0755 "${pre_tmp}/extract/dnstt-server" "$SLOWDNS_BIN"
+            ok "Prebuilt dnstt-server SHA-256 verified & installed instantly."
+            break
+          fi
+        fi
+      done
+      rm -rf "$pre_tmp"
+    fi
+  fi
+
+  # Fallback: compile from official source if prebuilt binary was unavailable
   if [[ ! -x "$SLOWDNS_BIN" ]]; then
     if ! command -v go &>/dev/null || ! command -v git &>/dev/null; then
-      info "Installing Go compiler & Git from Rocky Linux official repository..."
+      info "Installing Go compiler & Git from Enterprise Linux repository..."
       dnf install -y golang git >/dev/null 2>&1 || true
     fi
     if ! command -v go &>/dev/null; then
@@ -131,7 +188,8 @@ slowdns_install() {
     local build_tmp
     build_tmp=$(mktemp -d)
     chmod 700 "$build_tmp"
-    if git clone --depth 1 "$SLOWDNS_GIT_URL" "$build_tmp/dnstt" >/dev/null 2>&1; then
+    if git clone --depth 1 "$SLOWDNS_GIT_URL" "$build_tmp/dnstt" >/dev/null 2>&1 || \
+       git clone --depth 1 "https://github.com/Mygod/dnstt.git" "$build_tmp/dnstt" >/dev/null 2>&1; then
       (
         cd "$build_tmp/dnstt/dnstt-server" && \
         CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o "$SLOWDNS_BIN"

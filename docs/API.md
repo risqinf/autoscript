@@ -1,6 +1,6 @@
 # Autoscript VPN — Enterprise RESTful API Reference Manual
 
-> **Version:** 5.5.0 (Enterprise Production Release)  
+> **Version:** 5.6.0 (Enterprise Production Release — EL9 & EL10)  
 > **Server Engine:** Go FastHTTP Daemon (`api-server`) + Separated SQLite WAL Reader/Writer Pools (Zero CGO)  
 > **Security Standard:** 5-Layer Strict SHA-256 + Canonical HMAC-SHA256 + Mutual Response Signatures  
 > **Repository:** [https://github.com/risqinf/autoscript](https://github.com/risqinf/autoscript)
@@ -291,7 +291,7 @@ Returns daemon health, API version, current Unix `server_time` (for client clock
     "security_mode": "strict",
     "server_time": 1762100000,
     "status": "ok",
-    "version": "5.5.0"
+    "version": "5.6.0"
   }
 }
 ```
@@ -305,7 +305,7 @@ Verifies all 5 cryptographic SHA-256 layers and returns a detailed verification 
   "message": "Multi-layer SHA-256 verification succeeded",
   "data": {
     "authenticated": true,
-    "version": "5.5.0",
+    "version": "5.6.0",
     "server_time": 1762100005,
     "verification": {
       "token_name": "default",
@@ -338,6 +338,7 @@ All account operations use **100% standard REST endpoints** — there is NO sepa
 | Method | Endpoint | Description |
 |---|---|---|
 | `GET` | `/api/accounts` | Cross-protocol summary + search (`?protocol=&status=&search=&page=1&per_page=50`) |
+| `POST` | `/api/accounts` | **Unified Create (Protocol in Body)**: pass `"protocol": "vless\|vmess\|trojan\|ssh\|noobz"` in JSON body (supports single & Flash-Sale bulk) |
 | `POST` | `/api/accounts/{protocol}` | **Unified Create**: creates **1 single account** OR **up to 1,000 Flash-Sale accounts in 1 request** (`count > 1`, `accounts: [...]`, or JSON array `[...]`) |
 | `GET` | `/api/accounts/{protocol}` | List accounts (`?status=active&search=alice&page=1&per_page=50`) |
 | `PUT` | `/api/accounts/{protocol}` | Batch renew multiple accounts (`{"usernames": [...], "days": 30}`) |
@@ -345,12 +346,20 @@ All account operations use **100% standard REST endpoints** — there is NO sepa
 | `GET` | `/api/accounts/{protocol}/{username}` | Get single account with real-time live bandwidth usage |
 | `PUT` | `/api/accounts/{protocol}/{username}` | Update quota, IP limit, password, note, or extend days |
 | `DELETE` | `/api/accounts/{protocol}/{username}` | Soft-delete single account & terminate active user sessions |
+| `POST` | `/api/accounts/{protocol}/{username}/delete` | POST alias to delete single account (for HTTP clients/webhooks restricted to POST) |
 | `POST` | `/api/accounts/{protocol}/{username}/renew` | Renew single account validity (`{"days": 30, "reset_quota": true}`) |
 | `POST` | `/api/accounts/{protocol}/{username}/recovery` | Recover soft-deleted or suspended account |
 | `POST` | `/api/accounts/{protocol}/{username}/suspend` | Suspend account & disconnect sessions (`{"reason": "abuse"}`) |
 | `POST` | `/api/accounts/{protocol}/{username}/unsuspend` | Restore suspended account to `active` |
 | `POST` | `/api/accounts/{protocol}/{username}/reset-quota` | Reset `used_bytes` (and `ssh_proto_usage`) to `0` |
 | `POST` | `/api/accounts/{protocol}/{username}/kick` | Disconnect active user sessions without restarting global daemons |
+| `GET` | `/api/users/{username}` | **Auto-Detect User Login & All Info** across all protocols by username alone |
+| `GET` | `/api/users/{username}/login` | **Auto-Detect User Login & All Info** (online status, protocol, transport, IPs, ISP, GeoIP, apps/domains, quota, config links) |
+| `POST` | `/api/users/{username}/renew` | **Auto-Detect Renew**: extends validity across detected protocol(s) (`{"days": 30, "reset_quota": false}`) |
+| `DELETE` | `/api/users/{username}` | **Auto-Detect Delete**: deletes user across detected protocol(s) |
+| `POST` | `/api/users/{username}/delete` | **Auto-Detect Delete (POST alias)** |
+
+> **Zero-Downtime Simultaneous Order Guarantee (`100+ Concurrent Buyers`)**: When 100+ independent buyers hit `POST /api/accounts/{protocol}` or `POST /api/accounts` at the exact same millisecond, the API uses **Leader-Follower Group-Commit Xray Write Coalescing** (1 JSON parse + 1 atomic rename + 1 `xray -test` + 1 debounced `250ms` reload), **Cross-Process `flock` Batch `/etc/shadow` Mutation**, **DB-First Atomic Reservation** (`409 Conflict` on duplicate race), and **SQLite WAL `busy_timeout(15000)`** so zero requests ever fail or block.
 
 - **Optional Idempotency Header (`POST /api/accounts/{protocol}`)**: `X-Idempotency-Key: <unique-order-id>` — caches the `201 Created` payload for 15 minutes so network retries never create duplicate accounts (returns `X-Idempotent-Replay: true`).
 
@@ -554,9 +563,83 @@ Provides real-time visibility into connected users across every protocol, includ
 - **ISP / ASN & Geographic Location** (3-tier free GeoIP lookup: `ip-api.com/batch` -> `ipwho.is` -> `freeipapi.com` with 24h RAM + `/run/autoscript-geoip.cache` caching)
 
 ### Endpoints
+- `GET /api/users/{username}/login` *(or `GET /api/users/{username}` or `GET /api/monitor/users/{username}`)* — **Auto-Detect User Login by Username & All Information**: automatically detects every protocol (`ssh`, `vless`, `vmess`, `trojan`, `noobz`) belonging to `{username}` without needing to specify `{protocol}`, returning online state, active sub-protocols (`openssh`, `dropbear`, `ssh_ssl`, `ssh_ws`, `slowdns`, `openvpn`, Xray transports), connected IPs, ISPs/ASNs, GeoIP locations, accessed apps/domains, full quota breakdown, and ready-to-use `config` connection links!
 - `GET /api/monitor` — Unified server-wide live report across ALL 5 protocols (`total_online_users`, `total_connections`, `by_protocol_count`, `top_apps`, `protocols`)
 - `GET /api/monitor/{protocol}` — Live connected users for `ssh`, `vless`, `vmess`, `trojan`, `noobz`, or `all`
-- `GET /api/monitor/{protocol}/{username}` *(or `/activity`)* — Deep real-time telemetry for a single user
+- `GET /api/monitor/{protocol}/{username}` *(or `/activity`)* — Deep real-time telemetry for a single user on a known protocol
+
+### Example Response (`GET /api/users/{username}/login` — Auto-Detect Protocol & All Information)
+```json
+{
+  "success": true,
+  "code": 200,
+  "message": "User auto-detected login & all information retrieved",
+  "data": {
+    "username": "budi_tunnel01",
+    "found": true,
+    "online": true,
+    "primary_protocol": "ssh",
+    "matched_protocols": ["ssh"],
+    "active_protocols": ["ssh_ssl", "openvpn"],
+    "transports": ["ssh-ssl-tls", "openvpn-tcp"],
+    "status": "active",
+    "total_active_ips": 2,
+    "ips": ["203.0.113.10", "198.51.100.25"],
+    "isps": ["Telkomsel Indonesia", "Biznet Networks"],
+    "locations": [
+      {
+        "ip": "203.0.113.10",
+        "country": "Indonesia",
+        "country_code": "ID",
+        "region": "Jakarta",
+        "city": "Jakarta",
+        "isp": "Telkomsel Indonesia",
+        "asn": "AS23693"
+      }
+    ],
+    "accessed_apps": ["YouTube", "Mobile Legends", "WhatsApp"],
+    "accessed_domains": ["rr2---sn.googlevideo.com", "mlbb.moonton.com", "g.whatsapp.net"],
+    "quota": {
+      "quota_bytes": 107374182400,
+      "quota_human": "100.00 GB",
+      "used_bytes": 2993057792,
+      "used_human": "2.79 GB",
+      "remaining_bytes": 104381124608,
+      "remaining_human": "97.21 GB",
+      "usage_percent": 2.7,
+      "ssh_breakdown": {
+        "openssh":  { "sub_protocol": "openssh",  "total_bytes": 157286400,  "human_total": "150.00 MB" },
+        "dropbear": { "sub_protocol": "dropbear", "total_bytes": 0,          "human_total": "0 B" },
+        "ssh_ssl":  { "sub_protocol": "ssh_ssl",  "total_bytes": 1207959552, "human_total": "1.12 GB" },
+        "ssh_ws":   { "sub_protocol": "ssh_ws",   "total_bytes": 0,          "human_total": "0 B" },
+        "slowdns":  { "sub_protocol": "slowdns",  "total_bytes": 15728640,   "human_total": "15.00 MB" },
+        "openvpn":  { "sub_protocol": "openvpn",  "total_bytes": 1610612736, "human_total": "1.50 GB" },
+        "total_bytes": 2991587328,
+        "human_total": "2.79 GB"
+      }
+    },
+    "accounts": [
+      {
+        "protocol": "ssh",
+        "online": true,
+        "account": {
+          "username": "budi_tunnel01",
+          "protocol": "ssh",
+          "status": "active",
+          "limit_ip": 3,
+          "expired_at": "2026-12-02T19:50:00Z"
+        },
+        "config": {
+          "domain": "vpn.example.com",
+          "http_custom": "vpn.example.com:1-65535@budi_tunnel01:SecretPass123",
+          "ovpn_tcp_url": "https://vpn.example.com/risqinf/openvpn/tcp.ovpn"
+        }
+      }
+    ],
+    "checked_at": "2026-11-02T21:15:00Z"
+  }
+}
+```
 
 ### Example Response (`GET /api/monitor/vless/{username}/activity`)
 ```json

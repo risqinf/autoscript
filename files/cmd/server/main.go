@@ -23,8 +23,8 @@ import (
 	_ "modernc.org/sqlite"
 )
 
-// Version is injected at build time via -ldflags "-X main.Version=v5.5.0".
-var Version = "v5.5.0"
+// Version is injected at build time via -ldflags "-X main.Version=v5.6.0".
+var Version = "v5.6.0"
 
 func main() {
 	showVersion := flag.Bool("version", false, "Print version and exit")
@@ -42,7 +42,7 @@ func main() {
 	}
 
 	// Open API database (single writer pool; hot path uses atomic memory cache)
-	apiDB, err := sql.Open("sqlite", cfg.APIDatabasePath)
+	apiDB, err := sql.Open("sqlite", config.SQLiteDSN(cfg.APIDatabasePath, false))
 	if err != nil {
 		logger.Fatal().Err(err).Msg("failed to open API database")
 	}
@@ -67,7 +67,7 @@ func main() {
 	}
 
 	// Open Main VPN database with separated WAL Writer (1 conn) + Concurrent Readers (N conns)
-	mainWriteDB, err := sql.Open("sqlite", cfg.MainDatabasePath)
+	mainWriteDB, err := sql.Open("sqlite", config.SQLiteDSN(cfg.MainDatabasePath, false))
 	if err != nil {
 		logger.Fatal().Err(err).Msg("failed to open main write database")
 	}
@@ -76,7 +76,13 @@ func main() {
 	mainWriteDB.SetMaxIdleConns(1)
 	mainWriteDB.SetConnMaxLifetime(0)
 
-	mainReadDB, err := sql.Open("sqlite", cfg.MainDatabasePath)
+	// Ensure WAL schema is initialized on mainWriteDB BEFORE opening read-only pool connections
+	tempWriteRepo := repository.NewAccountRepository(mainWriteDB)
+	if err := tempWriteRepo.InitSchema(); err != nil {
+		logger.Fatal().Err(err).Msg("failed to initialize main account schema")
+	}
+
+	mainReadDB, err := sql.Open("sqlite", config.SQLiteDSN(cfg.MainDatabasePath, true))
 	if err != nil {
 		logger.Fatal().Err(err).Msg("failed to open main read database")
 	}
@@ -85,12 +91,8 @@ func main() {
 	mainReadDB.SetMaxOpenConns(readConns)
 	mainReadDB.SetMaxIdleConns(readConns)
 	mainReadDB.SetConnMaxLifetime(0)
-	_, _ = mainReadDB.Exec(`PRAGMA journal_mode=WAL; PRAGMA query_only=ON; PRAGMA busy_timeout=8000; PRAGMA temp_store=MEMORY;`)
 
 	accountRepo := repository.NewAccountRepositoryWithPools(mainReadDB, mainWriteDB)
-	if err := accountRepo.InitSchema(); err != nil {
-		logger.Fatal().Err(err).Msg("failed to initialize main account schema")
-	}
 
 	// Shared Singleflight Snapshot Cache
 	snapCache := cache.NewSnapshotCache()
@@ -103,7 +105,7 @@ func main() {
 
 	// Handlers
 	accountHdlr := handler.NewAccountHandlerWithConfig(accountSvc, xraySvc, val, cfg, &logger)
-	monitorHdlr := handler.NewMonitorHandler(monitorSvc, &logger)
+	monitorHdlr := handler.NewMonitorHandlerWithXray(monitorSvc, xraySvc, &logger)
 	systemHdlr := handler.NewSystemHandlerFull(monitorSvc, accountSvc, xraySvc, val, &logger)
 
 	// Multi-Layer SHA-256 Security & High-Throughput Middleware

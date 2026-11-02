@@ -361,6 +361,36 @@ require_root() {
   if [[ $EUID -ne 0 ]]; then err "This must be run as root."; exit 1; fi
 }
 
+# --- Enterprise Linux 9 & 10 Multi-Distro Detection ---
+# Supports Rocky Linux 9-10, RHEL 9-10, AlmaLinux 9-10, Oracle Linux 9-10.
+# Exports: AS_OS_ID, AS_OS_MAJOR, AS_OS_PRETTY, AS_ARCH_LABEL
+detect_el_distro() {
+  export AS_OS_ID="unknown"
+  export AS_OS_MAJOR="0"
+  export AS_OS_PRETTY="Unknown Linux"
+  if [[ -r /etc/os-release ]]; then
+    # shellcheck disable=SC1091
+    . /etc/os-release
+    AS_OS_ID="${ID:-unknown}"
+    AS_OS_PRETTY="${PRETTY_NAME:-${NAME:-Linux}}"
+    AS_OS_MAJOR="${VERSION_ID%%.*}"
+  fi
+  case "$(uname -m)" in
+    x86_64|amd64)  export AS_ARCH_LABEL="linux-amd64" ;;
+    aarch64|arm64) export AS_ARCH_LABEL="linux-arm64" ;;
+    armv7l|armv7*) export AS_ARCH_LABEL="linux-armv7" ;;
+    *)             export AS_ARCH_LABEL="" ;;
+  esac
+  case "$AS_OS_ID" in
+    rocky|rhel|almalinux|ol)
+      if [[ "$AS_OS_MAJOR" == "9" || "$AS_OS_MAJOR" == "10" ]]; then
+        return 0
+      fi
+      ;;
+  esac
+  return 1
+}
+
 # --- IP Geolocation & ASN Lookup (RAM + /run Persistent Cache, 3-Tier Free API) ---
 # Args: <ip>
 # Returns: <asn_or_isp>|<location> (e.g. "AS4818 DiGi Telecommunications Sdn. Bhd.|Kuching, Sarawak, MY")

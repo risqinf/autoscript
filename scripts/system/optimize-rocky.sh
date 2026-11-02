@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 # ========================================================
 # Project: Autoscript VPN by risqinf
-# Description: Extreme Rocky Linux 9 Kernel, ZRAM, Conntrack & Daemon
-#              Memory Tuning (1 vCPU / 1 GB RAM -> Hundreds of Users)
-# Version: 5.5.0
+# Description: Extreme Enterprise Linux 9 & 10 Kernel, ZRAM, Conntrack & Daemon
+#              Memory Tuning (Rocky 9-10, RHEL 9-10, AlmaLinux 9-10, Oracle Linux 9-10)
+# Version: 5.6.0
 # License: Apache License 2.0 (see LICENSE file)
 # Repository: https://github.com/risqinf/autoscript
 # ========================================================
@@ -99,7 +99,14 @@ else
   SWAPPINESS=15
 fi
 
-log_info "Applying Rocky Linux 9 Extreme Optimization [${TIER}] (${CPU_CORES} vCPU / ${RAM_MB} MB RAM)..."
+OS_PRETTY="Enterprise Linux"
+if [[ -r /etc/os-release ]]; then
+  # shellcheck disable=SC1091
+  . /etc/os-release
+  OS_PRETTY="${PRETTY_NAME:-Enterprise Linux}"
+fi
+
+log_info "Applying ${OS_PRETTY} Extreme Optimization [${TIER}] (${CPU_CORES} vCPU / ${RAM_MB} MB RAM)..."
 
 # ---------------------------------------------------------------------------
 # 2. Reclaim Reserved crashkernel/kdump Memory & Trim EL9 Bloat Services
@@ -214,7 +221,7 @@ EOF
 
   cat >/etc/sysctl.d/99-autoscript-extreme.conf <<EOF
 # ============================================================================
-# Autoscript v5.5.0 Extreme Rocky Linux 9 Kernel Tuning (${TIER})
+# Autoscript v5.6.0 Extreme Enterprise Linux 9 & 10 Kernel Tuning (${TIER})
 # ============================================================================
 
 # --- Forwarding & BBR Congestion Control ---
@@ -325,29 +332,57 @@ EOF
 # 5. Go Runtime Memory Bounds (GOMEMLIMIT / GOGC) & Squid Zero-Cache Lock
 # ---------------------------------------------------------------------------
 apply_daemon_memory_caps() {
-  # Xray memory cap + ray buffer optimization
+  # Xray memory cap + ray buffer optimization + zero-downtime restart resilience
   mkdir -p /etc/systemd/system/xray.service.d
   cat >/etc/systemd/system/xray.service.d/10-memory-tuning.conf <<EOF
+[Unit]
+StartLimitIntervalSec=0
+
 [Service]
 Environment="GOMEMLIMIT=${XRAY_MEMLIMIT}"
 Environment="GOGC=${XRAY_GOGC}"
 Environment="XRAY_RAY_BUFFER_SIZE=${XRAY_BUF_SIZE}"
+Restart=always
+RestartSec=1s
+OOMScoreAdjust=-500
 EOF
 
-  # API Server memory cap & concurrency tuning
+  # API Server memory cap, OOM killer immunity & zero-downtime resilience
   mkdir -p /etc/systemd/system/api-server.service.d
   cat >/etc/systemd/system/api-server.service.d/10-memory-tuning.conf <<EOF
+[Unit]
+StartLimitIntervalSec=0
+
 [Service]
 Environment="GOMEMLIMIT=${API_MEMLIMIT}"
 Environment="GOGC=${API_GOGC}"
+Restart=always
+RestartSec=1s
+OOMScoreAdjust=-900
 EOF
 
-  # SSH-WS proxy memory cap
+  # SSH-WS proxy memory cap & resilience
   mkdir -p /etc/systemd/system/ssh-ws.service.d
   cat >/etc/systemd/system/ssh-ws.service.d/10-memory-tuning.conf <<EOF
+[Unit]
+StartLimitIntervalSec=0
+
 [Service]
 Environment="GOMEMLIMIT=${SSHWS_MEMLIMIT}"
 Environment="GOGC=${API_GOGC}"
+Restart=always
+RestartSec=1s
+EOF
+
+  # Dropbear zero-downtime burst resilience
+  mkdir -p /etc/systemd/system/dropbear.service.d
+  cat >/etc/systemd/system/dropbear.service.d/10-resilience.conf <<EOF
+[Unit]
+StartLimitIntervalSec=0
+
+[Service]
+Restart=always
+RestartSec=1s
 EOF
 
   # Optimize Squid to zero disk/object cache & strict VPS-only destination ACL (anti-open-proxy!)
@@ -356,7 +391,7 @@ EOF
     myip=$(hostname -I 2>/dev/null | awk '{print $1}')
     domain=$(cat /etc/xray/domain 2>/dev/null | tr -d '[:space:]')
     cat >/etc/squid/squid.conf <<EOF
-# Autoscript v5.5.0 Hardened & Low-Memory Squid Configuration
+# Autoscript v5.6.0 Hardened & Low-Memory Squid Configuration
 acl to_vps_ip dst 127.0.0.1/32
 $( [[ -n "$myip" ]] && echo "acl to_vps_ip dst ${myip}/32" )
 $( [[ -n "$domain" && "$domain" != "notset" ]] && echo "acl to_vps_dom dstdomain ${domain}" )
@@ -433,7 +468,7 @@ if [[ "$QUIET" == "--json" ]]; then
   exit 0
 fi
 
-log_ok "Rocky Linux 9 Extreme Optimization [${TIER}] completed!"
+log_ok "${OS_PRETTY} Extreme Optimization [${TIER}] completed!"
 if [[ "$QUIET" != "--quiet" && -t 0 && "${2:-}" == "--menu" ]]; then
   echo ""
   read -n 1 -s -r -p " Press any key to return..."

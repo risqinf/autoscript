@@ -102,7 +102,7 @@ func setupTestAPI(t *testing.T) *testAPIEnv {
 		RateLimitWindow:  60,
 	}
 
-	apiDB, err := sql.Open("sqlite", apiDBPath)
+	apiDB, err := sql.Open("sqlite", config.SQLiteDSN(apiDBPath, false))
 	if err != nil {
 		t.Fatalf("open apiDB: %v", err)
 	}
@@ -118,14 +118,18 @@ func setupTestAPI(t *testing.T) *testAPIEnv {
 		t.Fatalf("sync key file: %v", err)
 	}
 
-	mainWriteDB, err := sql.Open("sqlite", mainDBPath)
+	mainWriteDB, err := sql.Open("sqlite", config.SQLiteDSN(mainDBPath, false))
 	if err != nil {
 		t.Fatalf("open mainWriteDB: %v", err)
 	}
 	t.Cleanup(func() { _ = mainWriteDB.Close() })
 	mainWriteDB.SetMaxOpenConns(1)
 
-	mainReadDB, err := sql.Open("sqlite", mainDBPath)
+	if err := repository.NewAccountRepository(mainWriteDB).InitSchema(); err != nil {
+		t.Fatalf("init main schema: %v", err)
+	}
+
+	mainReadDB, err := sql.Open("sqlite", config.SQLiteDSN(mainDBPath, true))
 	if err != nil {
 		t.Fatalf("open mainReadDB: %v", err)
 	}
@@ -133,9 +137,6 @@ func setupTestAPI(t *testing.T) *testAPIEnv {
 	mainReadDB.SetMaxOpenConns(4)
 
 	accRepo := repository.NewAccountRepositoryWithPools(mainReadDB, mainWriteDB)
-	if err := accRepo.InitSchema(); err != nil {
-		t.Fatalf("init main schema: %v", err)
-	}
 
 	logger := zerolog.Nop()
 	snap := cache.NewSnapshotCache()
@@ -146,7 +147,7 @@ func setupTestAPI(t *testing.T) *testAPIEnv {
 	monSvc := service.NewMonitorServiceWithCache(accRepo, cfg, snap, &logger)
 
 	accHdlr := handler.NewAccountHandlerWithConfig(accSvc, xraySvc, val, cfg, &logger)
-	monHdlr := handler.NewMonitorHandler(monSvc, &logger)
+	monHdlr := handler.NewMonitorHandlerWithXray(monSvc, xraySvc, &logger)
 	sysHdlr := handler.NewSystemHandlerFull(monSvc, accSvc, xraySvc, val, &logger)
 
 	verifier := security.NewVerifier(apiRepo, cfg)
@@ -455,5 +456,178 @@ func TestHighConcurrencySingleflightStress(t *testing.T) {
 	}
 	if okCount.Load() != totalRequests {
 		t.Fatalf("expected all %d concurrent signed requests to return 200, got %d", totalRequests, okCount.Load())
+	}
+}
+
+func Test100SimultaneousOrdersAndAutoDetectUserLogin(t *testing.T) {
+	env := setupTestAPI(t)
+
+	// 1. Fire 100 simultaneous VLESS orders + 100 simultaneous SSH orders at the exact same millisecond via a startGate barrier!
+	const simultaneousBuyersPerProto = 100
+	startGate := make(chan struct{})
+	var wg sync.WaitGroup
+	var vlessCreated atomic.Int64
+	var sshCreated atomic.Int64
+	var firstErr atomic.Value
+
+	for i := 0; i < simultaneousBuyersPerProto; i++ {
+		wg.Add(2)
+
+		// Simultaneous VLESS buyer
+		go func(idx int) {
+			defer wg.Done()
+			<-startGate
+			payload := []byte(fmt.Sprintf(`{"username":"order_vless_%03d","quota":30,"limit_ip":2,"days":30}`, idx))
+			code, respBody, _, err := env.executeSigned("POST", "/api/accounts/vless", payload, nil)
+			if err != nil {
+				firstErr.CompareAndSwap(nil, err.Error())
+				return
+			}
+			if code != 201 {
+				firstErr.CompareAndSwap(nil, fmt.Sprintf("vless buyer %d got HTTP %d: %s", idx, code, string(respBody)))
+				return
+			}
+			vlessCreated.Add(1)
+		}(i)
+
+		// Simultaneous SSH buyer (using POST /api/accounts with protocol inside JSON body!)
+		go func(idx int) {
+			defer wg.Done()
+			<-startGate
+			payload := []byte(fmt.Sprintf(`{"protocol":"ssh","username":"order_ssh_%03d","password":"Pass#%04dSafe","quota":25,"limit_ip":2,"days":30}`, idx, idx))
+			code, respBody, _, err := env.executeSigned("POST", "/api/accounts", payload, nil)
+			if err != nil {
+				firstErr.CompareAndSwap(nil, err.Error())
+				return
+			}
+			if code != 201 {
+				firstErr.CompareAndSwap(nil, fmt.Sprintf("ssh buyer %d got HTTP %d: %s", idx, code, string(respBody)))
+				return
+			}
+			sshCreated.Add(1)
+		}(i)
+	}
+
+	// Release all 200 concurrent buyers simultaneously!
+	close(startGate)
+	wg.Wait()
+
+	if e := firstErr.Load(); e != nil {
+		t.Fatalf("simultaneous order burst error: %v", e)
+	}
+	if vlessCreated.Load() != simultaneousBuyersPerProto || sshCreated.Load() != simultaneousBuyersPerProto {
+		t.Fatalf("expected 100 VLESS + 100 SSH orders created, got vless=%d ssh=%d", vlessCreated.Load(), sshCreated.Load())
+	}
+
+	// Verify all 100 VLESS accounts were coalesced cleanly into Xray config.json without dropping a single client
+	rawXray, err := os.ReadFile(env.xrayCfg)
+	if err != nil {
+		t.Fatalf("read xray config: %v", err)
+	}
+	var parsedCfg struct {
+		Inbounds []struct {
+			Tag      string `json:"tag"`
+			Settings struct {
+				Clients []map[string]interface{} `json:"clients"`
+			} `json:"settings"`
+		} `json:"inbounds"`
+	}
+	if err := json.Unmarshal(rawXray, &parsedCfg); err != nil {
+		t.Fatalf("parse xray config: %v", err)
+	}
+	if len(parsedCfg.Inbounds[0].Settings.Clients) != simultaneousBuyersPerProto {
+		t.Fatalf("expected %d VLESS clients in vless-ws after 100 simultaneous orders, got %d",
+			simultaneousBuyersPerProto, len(parsedCfg.Inbounds[0].Settings.Clients))
+	}
+
+	// 2. Duplicate username collision race: 2 buyers submit the exact same username at once -> 1 wins (201), 1 gets 409, winner stays in Xray!
+	dupGate := make(chan struct{})
+	var dupCodes [2]int
+	var dupWG sync.WaitGroup
+	dupWG.Add(2)
+	for k := 0; k < 2; k++ {
+		go func(slot int) {
+			defer dupWG.Done()
+			<-dupGate
+			c, _, _, _ := env.executeSigned("POST", "/api/accounts/vless", []byte(`{"username":"race_dup_user","quota":10,"limit_ip":1,"days":15}`), nil)
+			dupCodes[slot] = c
+		}(k)
+	}
+	close(dupGate)
+	dupWG.Wait()
+	if !((dupCodes[0] == 201 && dupCodes[1] == 409) || (dupCodes[0] == 409 && dupCodes[1] == 201)) {
+		t.Fatalf("expected one 201 and one 409 on simultaneous duplicate username, got %v", dupCodes)
+	}
+
+	// 3. Seed live Xray access.log + SSH all-protocol usage and test Auto-Detect User Login & All Information!
+	nowTS := time.Now().Format("2006/01/02 15:04:05")
+	logLines := fmt.Sprintf(
+		"%s.100000 from 203.0.113.10:51001 accepted tcp:rr2---sn.googlevideo.com:443 [vless-ws -> direct] email: order_vless_007\n"+
+			"%s.110000 from 198.51.100.25:51002 accepted tcp:web.whatsapp.com:443 [vless-grpc -> direct] email: order_vless_007\n",
+		nowTS, nowTS,
+	)
+	_ = os.WriteFile(env.accessLog, []byte(logLines), 0600)
+
+	_, _ = env.mainDB.Exec(`
+		INSERT INTO ssh_proto_usage (username, sub_protocol, rx_bytes, tx_bytes) VALUES
+		('order_ssh_007', 'ssh_ssl', 268435456, 134217728),
+		('order_ssh_007', 'openvpn', 536870912, 268435456);
+	`)
+
+	// Check VLESS user via GET /api/users/{username}/login AND GET /api/monitor/users/{username}
+	for _, endpoint := range []string{"/api/users/order_vless_007/login", "/api/users/order_vless_007", "/api/monitor/users/order_vless_007"} {
+		code, body, _ := env.doSigned(t, "GET", endpoint, nil, nil)
+		if code != 200 {
+			t.Fatalf("expected 200 on %s, got %d: %s", endpoint, code, string(body))
+		}
+		var autoResp struct {
+			Data model.UserAutoDetectReport `json:"data"`
+		}
+		if err := json.Unmarshal(body, &autoResp); err != nil {
+			t.Fatalf("unmarshal auto-detect report on %s: %v", endpoint, err)
+		}
+		if !autoResp.Data.Online || autoResp.Data.PrimaryProtocol != "vless" || autoResp.Data.TotalActiveIPs != 2 {
+			t.Fatalf("unexpected auto-detect state on %s: %+v", endpoint, autoResp.Data)
+		}
+		if len(autoResp.Data.ISPs) != 2 || len(autoResp.Data.Locations) != 2 || len(autoResp.Data.AccessedApps) < 2 {
+			t.Fatalf("expected full ISP, GeoIP, and accessed apps in auto-detect report: %+v", autoResp.Data)
+		}
+		if len(autoResp.Data.Accounts) != 1 || autoResp.Data.Accounts[0].Config == nil || autoResp.Data.Accounts[0].Config.Link == "" {
+			t.Fatalf("expected full account details + connection config link in auto-detect report")
+		}
+	}
+
+	// Check SSH user via GET /api/users/order_ssh_007/login (auto-detects SSH + 6-subprotocol quota breakdown!)
+	code, sshAutoBody, _ := env.doSigned(t, "GET", "/api/users/order_ssh_007/login", nil, nil)
+	if code != 200 {
+		t.Fatalf("expected 200 on /api/users/order_ssh_007/login, got %d: %s", code, string(sshAutoBody))
+	}
+	var sshAutoResp struct {
+		Data model.UserAutoDetectReport `json:"data"`
+	}
+	if err := json.Unmarshal(sshAutoBody, &sshAutoResp); err != nil {
+		t.Fatalf("unmarshal ssh auto-detect: %v", err)
+	}
+	if sshAutoResp.Data.PrimaryProtocol != "ssh" || sshAutoResp.Data.QuotaSummary.SSHBreakdown == nil ||
+		sshAutoResp.Data.QuotaSummary.SSHBreakdown.SSHSSL.TotalBytes == 0 ||
+		sshAutoResp.Data.QuotaSummary.SSHBreakdown.OpenVPN.TotalBytes == 0 {
+		t.Fatalf("expected auto-detected SSH protocol with ssh_ssl & openvpn breakdown, got %+v", sshAutoResp.Data)
+	}
+
+	// 4. Test Auto-Detect Renew (POST /api/users/{username}/renew) & Auto-Detect Delete (DELETE /api/users/{username})
+	code, renAutoBody, _ := env.doSigned(t, "POST", "/api/users/order_vless_007/renew", []byte(`{"days":30,"reset_quota":true}`), nil)
+	if code != 200 {
+		t.Fatalf("expected 200 on POST /api/users/order_vless_007/renew, got %d: %s", code, string(renAutoBody))
+	}
+
+	code, delAutoBody, _ := env.doSigned(t, "DELETE", "/api/users/order_vless_007", nil, nil)
+	if code != 200 {
+		t.Fatalf("expected 200 on DELETE /api/users/order_vless_007, got %d: %s", code, string(delAutoBody))
+	}
+
+	// Confirm deleted user now returns 404 on auto-detect lookup
+	code, _, _ = env.doSigned(t, "GET", "/api/users/order_vless_007/login", nil, nil)
+	if code != 404 {
+		t.Fatalf("expected 404 after auto-detect delete, got %d", code)
 	}
 }

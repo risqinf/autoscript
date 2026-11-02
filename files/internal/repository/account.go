@@ -16,6 +16,7 @@ type AccountRepository interface {
 
 	GetByUsername(ctx context.Context, protocol, username string) (*model.Account, error)
 	GetByUsernameIncludingDeleted(ctx context.Context, protocol, username string) (*model.Account, error)
+	GetByUsernameAllProtocols(ctx context.Context, username string) ([]*model.Account, error)
 	Exists(ctx context.Context, protocol, username string) (bool, error)
 	SecretInUse(ctx context.Context, secret string) (bool, error)
 	ExistingUsernames(ctx context.Context, protocol string, usernames []string) (map[string]bool, error)
@@ -100,6 +101,7 @@ func (r *accountRepository) InitSchema() error {
 	);
 
 	CREATE INDEX IF NOT EXISTS idx_accounts_proto_status ON accounts(protocol,status);
+	CREATE INDEX IF NOT EXISTS idx_accounts_username ON accounts(username);
 	CREATE INDEX IF NOT EXISTS idx_accounts_expired ON accounts(expired_at);
 
 	CREATE TABLE IF NOT EXISTS ssh_proto_usage (
@@ -151,6 +153,46 @@ func (r *accountRepository) GetByUsernameIncludingDeleted(ctx context.Context, p
 		LIMIT 1
 	`
 	return r.queryAccount(ctx, query, protocol, username)
+}
+
+// GetByUsernameAllProtocols auto-detects and returns all non-deleted accounts matching username across all protocols.
+func (r *accountRepository) GetByUsernameAllProtocols(ctx context.Context, username string) ([]*model.Account, error) {
+	rows, err := r.readDB.QueryContext(ctx, `
+		SELECT id, protocol, username, secret, quota_bytes, used_bytes,
+			   limit_ip, expired_at, status, created_at, updated_at, note
+		FROM accounts
+		WHERE username = ? AND status != 'deleted'
+		ORDER BY CASE protocol
+			WHEN 'ssh' THEN 1
+			WHEN 'vless' THEN 2
+			WHEN 'vmess' THEN 3
+			WHEN 'trojan' THEN 4
+			WHEN 'noobz' THEN 5
+			ELSE 6
+		END
+	`, username)
+	if err != nil {
+		return nil, fmt.Errorf("auto-detect accounts for %s: %w", username, err)
+	}
+	defer rows.Close()
+
+	var list []*model.Account
+	for rows.Next() {
+		var acc model.Account
+		var expUnix, cUnix, uUnix int64
+		if err := rows.Scan(
+			&acc.ID, &acc.Protocol, &acc.Username, &acc.Secret,
+			&acc.QuotaBytes, &acc.UsedBytes, &acc.LimitIP,
+			&expUnix, &acc.Status, &cUnix, &uUnix, &acc.Note,
+		); err != nil {
+			return nil, fmt.Errorf("scan auto-detected account: %w", err)
+		}
+		acc.ExpiredAt = time.Unix(expUnix, 0)
+		acc.CreatedAt = time.Unix(cUnix, 0)
+		acc.UpdatedAt = time.Unix(uUnix, 0)
+		list = append(list, &acc)
+	}
+	return list, nil
 }
 
 func (r *accountRepository) queryAccount(ctx context.Context, query string, args ...interface{}) (*model.Account, error) {
@@ -276,7 +318,8 @@ func (r *accountRepository) SecretsInUse(ctx context.Context, secrets []string) 
 	return used, nil
 }
 
-// Create inserts or reactivates a single account.
+// Create inserts a new account or reactivates a soft-deleted row atomically.
+// If a non-deleted account with the same (protocol, username) already exists, returns model.ErrAccountExists (zero TOCTOU race).
 func (r *accountRepository) Create(ctx context.Context, account *model.Account) error {
 	now := time.Now().Unix()
 	query := `
@@ -291,6 +334,7 @@ func (r *accountRepository) Create(ctx context.Context, account *model.Account) 
 			status = excluded.status,
 			updated_at = excluded.updated_at,
 			note = excluded.note
+		WHERE accounts.status = 'deleted'
 	`
 	res, err := r.writeDB.ExecContext(ctx, query,
 		account.Protocol, account.Username, account.Secret,
@@ -299,6 +343,9 @@ func (r *accountRepository) Create(ctx context.Context, account *model.Account) 
 	)
 	if err != nil {
 		return fmt.Errorf("insert account: %w", err)
+	}
+	if rows, err := res.RowsAffected(); err == nil && rows == 0 {
+		return model.ErrAccountExists
 	}
 	if id, err := res.LastInsertId(); err == nil && id > 0 {
 		account.ID = id

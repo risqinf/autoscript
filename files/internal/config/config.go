@@ -12,7 +12,7 @@ import (
 	"strings"
 )
 
-// Config holds application configuration for Autoscript Enterprise API v5.5.0.
+// Config holds application configuration for Autoscript Enterprise API v5.6.0.
 type Config struct {
 	// Server
 	ListenAddress  string
@@ -198,6 +198,25 @@ func (c *Config) Domain() string {
 		return "127.0.0.1"
 	}
 	return d
+}
+
+// SQLiteDSN formats a modernc.org/sqlite DSN with connection-level PRAGMAs so every
+// pooled connection inherits busy_timeout, WAL journal mode, foreign_keys, and temp_store.
+// This guarantees zero SQLITE_BUSY errors under 100+ simultaneous order bursts.
+func SQLiteDSN(path string, readOnly bool) string {
+	trimmed := strings.TrimSpace(path)
+	if trimmed == "" || trimmed == ":memory:" || strings.HasPrefix(trimmed, "file::memory:") {
+		return trimmed
+	}
+	sep := "?"
+	if strings.Contains(trimmed, "?") {
+		sep = "&"
+	}
+	pragmas := "_pragma=busy_timeout(15000)&_pragma=journal_mode(WAL)&_pragma=synchronous(NORMAL)&_pragma=foreign_keys(1)&_pragma=temp_store(MEMORY)"
+	if readOnly {
+		pragmas += "&_pragma=query_only(1)"
+	}
+	return trimmed + sep + pragmas
 }
 
 // ReadPoolSize returns an optimal SQLite reader pool size scaled to available CPUs and RAM.

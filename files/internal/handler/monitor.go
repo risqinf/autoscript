@@ -8,17 +8,25 @@ import (
 	"github.com/valyala/fasthttp"
 )
 
-// MonitorHandler handles HTTP requests for live session monitoring, accessed apps/domains, ISP/GeoIP, quota, and bandwidth.
+// MonitorHandler handles HTTP requests for live session monitoring, auto-detect user login,
+// accessed apps/domains, ISP/GeoIP, all-protocol quota, and server bandwidth.
 type MonitorHandler struct {
 	service   service.MonitorService
+	xray      service.XrayService
 	validator *validator.Validator
 	logger    *zerolog.Logger
 }
 
 // NewMonitorHandler creates a new MonitorHandler.
 func NewMonitorHandler(svc service.MonitorService, logger *zerolog.Logger) *MonitorHandler {
+	return NewMonitorHandlerWithXray(svc, nil, logger)
+}
+
+// NewMonitorHandlerWithXray creates a MonitorHandler wired with XrayService for full connection config generation in auto-detect user lookups.
+func NewMonitorHandlerWithXray(svc service.MonitorService, xray service.XrayService, logger *zerolog.Logger) *MonitorHandler {
 	return &MonitorHandler{
 		service:   svc,
+		xray:      xray,
 		validator: validator.New(),
 		logger:    logger,
 	}
@@ -72,9 +80,35 @@ func (h *MonitorHandler) Monitor(ctx *fasthttp.RequestCtx) {
 	writeSuccess(ctx, fasthttp.StatusOK, "Monitor data retrieved", entries)
 }
 
+// UserLoginAutoDetect handles GET /api/users/{username}, GET /api/users/{username}/login,
+// and GET /api/monitor/users/{username} (auto-detecting protocol(s) and returning full login, IP, ISP, GeoIP, app/domain, quota & config telemetry).
+func (h *MonitorHandler) UserLoginAutoDetect(ctx *fasthttp.RequestCtx) {
+	username := getUserValue(ctx, "username")
+	if !h.validator.IsValidUsername(username) {
+		writeError(ctx, fasthttp.StatusBadRequest, model.ErrValidation, "Invalid username")
+		return
+	}
+
+	opCtx, cancel := opContext()
+	defer cancel()
+
+	report, err := h.service.LookupUserAutoDetect(opCtx, username, h.xray)
+	if err != nil {
+		handleServiceError(ctx, err)
+		return
+	}
+	writeSuccess(ctx, fasthttp.StatusOK, "User auto-detected protocol, login status, and full telemetry retrieved", report)
+}
+
 // UserActivity handles GET /api/monitor/{protocol}/{username} and GET /api/monitor/{protocol}/{username}/activity.
+// When {protocol} is "users", "user", "auto", or "all", automatically delegates to UserLoginAutoDetect!
 func (h *MonitorHandler) UserActivity(ctx *fasthttp.RequestCtx) {
 	protocol := getUserValue(ctx, "protocol")
+	if protocol == "users" || protocol == "user" || protocol == "auto" || protocol == "all" {
+		h.UserLoginAutoDetect(ctx)
+		return
+	}
+
 	username := getUserValue(ctx, "username")
 	if !h.validator.IsValidProtocol(protocol) || !h.validator.IsValidUsername(username) {
 		writeError(ctx, fasthttp.StatusBadRequest, model.ErrValidation, "Invalid protocol or username")

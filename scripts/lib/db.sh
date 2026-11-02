@@ -10,8 +10,8 @@ __AS_DB_LOADED=1
 
 [[ -n "${__AS_COMMON_LOADED:-}" ]] || . "$(dirname "${BASH_SOURCE[0]}")/common.sh"
 
-# Busy timeout avoids "database is locked" under the looping services.
-AS_SQLITE_TIMEOUT=8000
+# Busy timeout avoids "database is locked" under burst orders + looping services.
+AS_SQLITE_TIMEOUT=15000
 
 # Run a SQL statement. Reads SQL from $1 (or stdin if $1 omitted).
 db_exec() {
@@ -66,6 +66,7 @@ CREATE TABLE IF NOT EXISTS accounts (
 );
 
 CREATE INDEX IF NOT EXISTS idx_accounts_proto_status ON accounts(protocol,status);
+CREATE INDEX IF NOT EXISTS idx_accounts_username ON accounts(username);
 CREATE INDEX IF NOT EXISTS idx_accounts_expired ON accounts(expired_at);
 
 CREATE TABLE IF NOT EXISTS ssh_proto_usage (
@@ -119,6 +120,7 @@ INSERT INTO accounts_migrate SELECT * FROM accounts;
 DROP TABLE accounts;
 ALTER TABLE accounts_migrate RENAME TO accounts;
 CREATE INDEX IF NOT EXISTS idx_accounts_proto_status ON accounts(protocol,status);
+CREATE INDEX IF NOT EXISTS idx_accounts_username ON accounts(username);
 CREATE INDEX IF NOT EXISTS idx_accounts_expired ON accounts(expired_at);
 COMMIT;
 PRAGMA foreign_keys=ON;

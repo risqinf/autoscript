@@ -3,6 +3,33 @@
 All notable changes to this project are documented here.
 This project adheres to [Semantic Versioning](https://semver.org/).
 
+## [5.6.0] - 2026-11-02
+
+Prebuilt Hardened Static Binaries (`Dropbear 2019.78`, `dnstt-server`, `autoscript-api`), Multi-Distro Enterprise Linux 9 & 10 Support, Zero-Downtime 100+ Simultaneous Order Burst Engine, Complete Auto-Detect User Login Endpoints, and Deep Security Hardening release: **Release 5.6.0**.
+
+### Added
+- **Prebuilt Hardened Static Binaries — Zero Compile Time on VPS (`scripts/build/build-dropbear-2019.sh`, `.github/workflows/release.yml`, `bin/`, `install.sh`, `menu-dropbear.sh`, `slowdns.sh`)**:
+  - Automated multi-arch (`linux-amd64` & `linux-arm64`) static builds for **Dropbear `2019.78`** (`dropbear` + `dropbearkey`), **SlowDNS (`dnstt-server`)**, and **`autoscript-api`**, published both to GitHub Releases and synced into `bin/` with cryptographic SHA-256 verification before extraction and installation.
+  - Linked static `Dropbear 2019.78` against `musl` + static `libxcrypt 4.4.36` (`--enable-hashes=all`) + `zlib`, providing native `/etc/shadow` password verification for both **EL10 `$y$` (`YESCRYPT`)** and **EL9 `$6$` (`SHA-512`)** without NSS shared-library dependencies or installing `Development Tools`/`gcc` on VPS nodes.
+- **Multi-Distro Enterprise Linux 9 & 10 Support (`install.sh`, `scripts/lib/common.sh`, `fix-firewall.sh`, `optimize-rocky.sh`, `install-api.sh`)**:
+  - Full compatibility across **Rocky Linux 9–10**, **RHEL 9–10**, **AlmaLinux 9–10**, and **Oracle Linux 9–10** (`x86_64` & `aarch64`), automatically enabling CRB / CodeReady Builder (including cloud RHUI & Oracle `ol9`/`ol10` repos) and EPEL 9/10 across both DNF4 and DNF5, resolving EL10 `iptables-nft` package changes, and locating `openvpn-plugin-auth-pam.so` dynamically.
+- **Complete Auto-Detect User Login & Lifecycle Endpoints (`files/internal/service/monitor.go`, `service/account.go`, `handler/`, `router/router.go`)**:
+  - Added `GET /api/users/{username}`, `GET /api/users/{username}/login`, and `GET /api/monitor/users/{username}` to auto-detect a user's protocol(s) (`ssh` [including `openssh`, `dropbear`, `ssh_ssl`, `ssh_ws`, `slowdns`, `openvpn`], `vless`, `vmess`, `trojan`, `noobz`) by username alone and return online status, active sub-protocols/transports, connected IPs, ISPs/ASNs, GeoIP locations, accessed apps/domains, quota summary (with 6-subprotocol `ssh_breakdown`), and connection `config` links.
+  - Added `POST /api/accounts` & `POST /api/trials` (accepting `"protocol"` in JSON body), `POST /api/accounts/{protocol}/{username}/delete`, `DELETE /api/users/{username}`, `POST /api/users/{username}/delete`, and `POST /api/users/{username}/renew`.
+- **Zero-Downtime 100+ Simultaneous Order Burst Engine (`files/internal/service/xray_config.go`, `service/shadow_lock.go`, `config/config.go`, `repository/account.go`)**:
+  - Implemented **Leader-Follower Group-Commit Write Coalescing** in `XrayConfigManager` so 100+ simultaneous `POST /api/accounts/{protocol}` requests coalesce into 1 JSON parse + 1 atomic `.tmp` rename + 1 `xray -test` + 1 debounced (`250ms`) `systemctl reload-or-restart xray`.
+  - Implemented `ShadowMutator` (`flock` on `/run/autoscript-shadow.lock` shared with `scripts/lib/account.sh`) batching concurrent SSH user creations into serialized `useradd` + a single batch `chpasswd` pipe so `/etc/passwd` never fails to lock.
+  - Added per-connection SQLite DSN pragmas (`busy_timeout(15000)`, `journal_mode(WAL)`, `synchronous(NORMAL)`, `query_only(1)` on reader pool) and DB-first atomic reservation (`409 Conflict` on duplicate concurrent username races).
+  - Verified with `Test100SimultaneousOrdersAndAutoDetectUserLogin` (200 simultaneous VLESS + SSH orders at a single barrier gate).
+
+### Security
+- **Compile-Time Hardened Dropbear `2019.78` (`scripts/build/build-dropbear-2019.sh`)**:
+  - Enforces DNS-rebinding-proof binary sockaddr SSRF filtering (`netio.c` & `svr-tcpfwd.c`), blocking `direct-tcpip` forwarding to loopback (`127.0.0.0/8`, `0.0.0.0/8`, `::1`, `::`) on all internal control ports (`9000`, `10085`, `81`, `82`, `8081`, etc.) while permitting BadVPN UDPGW (`7100, 7200, 7300`), and blocking cloud metadata IMDS (`169.254.0.0/16`, `fc00::/7`, `fe80::/10`) and private RFC1918/CGNAT networks.
+  - Enforces real-time `/etc/shadow` `sp_expire` account expiration inside `fill_passwd()` (`common-session.c`), disables remote port forwarding (`DROPBEAR_SVR_REMOTETCPFWD=0`), agent/X11 forwarding, DSA/3DES/CBC weak ciphers, and reverse-DNS lookup stalls.
+- **OpenSSH, SELinux & Systemd Resilience Hardening**:
+  - Added `/etc/ssh/sshd_config.d/00-autoscript.conf` (preceding cloud-init `50-*.conf` on EL9/EL10) with `PermitTTY no`, `AllowStreamLocalForwarding no`, `PermitTunnel no`, and `GatewayPorts no` for non-root tunnel accounts, plus SELinux `ssh_port_t` registration for port `3303`.
+  - Enforced fail-closed SHA-256 verification in `install-api.sh`, `StartLimitIntervalSec=0` + `OOMScoreAdjust=-900` on `api-server.service`, and `proxy_next_upstream off` on Nginx `/api/`.
+
 ## [5.5.0] - 2026-11-02
 
 Major Enterprise Performance, Multi-Layer Cryptographic Security, SSH All-Protocol Quota, Deep Live Session Telemetry, Flash-Sale Bulk Provisioning, and Extreme Rocky Linux 9 Optimization release: **Release 5.5.0**.
@@ -385,6 +412,7 @@ First public beta. Developed for **Rocky Linux 9**.
 - Legacy `.txt` account files and `config.json` comment markers.
 - Ads Block (helium) menu entry.
 
+[5.6.0]: https://github.com/risqinf/autoscript/releases/tag/v5.6.0
 [5.5.0]: https://github.com/risqinf/autoscript/releases/tag/v5.5.0
 [5.4.0]: https://github.com/risqinf/autoscript/releases/tag/v5.4.0
 [5.3.0]: https://github.com/risqinf/autoscript/releases/tag/v5.3.0

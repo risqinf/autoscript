@@ -371,3 +371,54 @@ type BulkCreateResult struct {
 	Accounts       []BulkAccountOutput `json:"accounts"`
 	Errors         []BulkItemError     `json:"errors,omitempty"`
 }
+
+// UserProtocolAccountDetail holds complete account, config, and live session state for one detected protocol.
+type UserProtocolAccountDetail struct {
+	Protocol           string        `json:"protocol"`
+	Online             bool          `json:"online"`
+	Status             string        `json:"status"`
+	DaysRemaining      int           `json:"days_remaining"`
+	ActiveIPCount      int           `json:"active_ip_count"`
+	IPLimit            int           `json:"ip_limit"`
+	ConnectedIPs       []string      `json:"connected_ips"`
+	ActiveSubProtocols []string      `json:"active_sub_protocols,omitempty"`
+	Transports         []string      `json:"transports,omitempty"`
+	Account            *Account      `json:"account"`
+	Config             *ConfigLink   `json:"config,omitempty"`
+	LiveMonitor        *MonitorEntry `json:"live_monitor,omitempty"`
+}
+
+// UserQuotaOverview summarizes cumulative quota & bandwidth usage across all detected protocols for a user.
+type UserQuotaOverview struct {
+	QuotaBytes     int64                   `json:"quota_bytes"`
+	QuotaHuman     string                  `json:"quota_human"`
+	UsedBytes      int64                   `json:"used_bytes"`
+	UsedHuman      string                  `json:"used_human"`
+	RemainingBytes int64                   `json:"remaining_bytes"`
+	RemainingHuman string                  `json:"remaining_human"`
+	UsagePercent   float64                 `json:"usage_percent"`
+	SSHBreakdown   *SSHProtoUsageBreakdown `json:"ssh_breakdown,omitempty"`
+}
+
+// UserAutoDetectReport provides unified auto-detected protocol, login status, ISP/GeoIP, app/domain, quota, and config telemetry for a username.
+type UserAutoDetectReport struct {
+	Username          string                      `json:"username"`
+	Online            bool                        `json:"online"`
+	AccountStatus     string                      `json:"account_status"`
+	PrimaryProtocol   string                      `json:"primary_protocol"`
+	DetectedProtocols []string                    `json:"detected_protocols"`
+	ActiveProtocols   []string                    `json:"active_protocols"`
+	ActiveTransports  []string                    `json:"active_transports"`
+	TotalActiveIPs    int                         `json:"total_active_ips"`
+	IPLimit           int                         `json:"ip_limit"`
+	ConnectedIPs      []string                    `json:"connected_ips"`
+	ISPs              []string                    `json:"isps"`
+	Locations         []GeoLocation               `json:"locations"`
+	AccessedApps      []string                    `json:"accessed_apps"`
+	AccessedDomains   []string                    `json:"accessed_domains"`
+	AppActivities     []AppActivity               `json:"app_activities"`
+	Sessions          []ClientSessionDetail       `json:"sessions"`
+	QuotaSummary      UserQuotaOverview           `json:"quota_summary"`
+	Accounts          []UserProtocolAccountDetail `json:"accounts"`
+	CheckedAt         time.Time                   `json:"checked_at"`
+}

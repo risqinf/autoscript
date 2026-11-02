@@ -26,7 +26,7 @@ import (
 	"github.com/rs/zerolog"
 )
 
-const AppVersion = "5.5.0"
+const AppVersion = "5.6.0"
 
 // MonitorService defines the interface for system, bandwidth, quota, and live session telemetry.
 type MonitorService interface {
@@ -40,6 +40,7 @@ type MonitorService interface {
 	GetMonitorEntries(ctx context.Context, protocol string) ([]model.MonitorEntry, error)
 	GetUnifiedMonitor(ctx context.Context) (*model.UnifiedMonitorReport, error)
 	GetUserActivity(ctx context.Context, protocol, username string) (*model.MonitorEntry, error)
+	LookupUserAutoDetect(ctx context.Context, username string, xraySvc XrayService) (*model.UserAutoDetectReport, error)
 
 	GetSSHAllProtocolQuota(ctx context.Context) (*model.SSHQuotaSummaryReport, error)
 	GetSSHUserQuota(ctx context.Context, username string) (*model.SSHUserQuotaDetail, error)
@@ -1680,6 +1681,267 @@ func (s *monitorService) GetUserActivity(ctx context.Context, protocol, username
 		SSHBreakdown:    sshBD,
 		ExpiredAt:       acc.ExpiredAt,
 	}, nil
+}
+
+// LookupUserAutoDetect automatically detects which protocol(s) a username belongs to (SSH/OpenSSH/Dropbear/SSH-SSL/SSH-WS/SlowDNS/OpenVPN,
+// VLESS, VMess, Trojan, NoobzVPN) and returns complete login state, connected IPs, ISPs, GeoIP locations, accessed apps/domains,
+// all-protocol quota usage, account metadata, and connection configuration links in one response.
+func (s *monitorService) LookupUserAutoDetect(ctx context.Context, username string, xraySvc XrayService) (*model.UserAutoDetectReport, error) {
+	accounts, err := s.repo.GetByUsernameAllProtocols(ctx, username)
+	if err != nil {
+		return nil, err
+	}
+
+	unified, _ := s.GetUnifiedMonitor(ctx)
+	liveByProto := make(map[string]model.MonitorEntry)
+	if unified != nil {
+		for proto, list := range unified.Protocols {
+			for _, entry := range list {
+				if entry.Username == username {
+					liveByProto[proto] = entry
+					break
+				}
+			}
+		}
+	}
+
+	if len(accounts) == 0 && len(liveByProto) == 0 {
+		return nil, model.ErrAccountNotFound
+	}
+
+	domain := ""
+	if s.config != nil {
+		domain = s.config.Domain()
+	}
+
+	report := &model.UserAutoDetectReport{
+		Username:          username,
+		DetectedProtocols: []string{},
+		ActiveProtocols:   []string{},
+		ActiveTransports:  []string{},
+		ConnectedIPs:      []string{},
+		ISPs:              []string{},
+		Locations:         []model.GeoLocation{},
+		AccessedApps:      []string{},
+		AccessedDomains:   []string{},
+		AppActivities:     []model.AppActivity{},
+		Sessions:          []model.ClientSessionDetail{},
+		Accounts:          []model.UserProtocolAccountDetail{},
+		CheckedAt:         time.Now(),
+	}
+
+	seenActiveProto := make(map[string]bool)
+	seenTransport := make(map[string]bool)
+	seenIP := make(map[string]bool)
+	seenISP := make(map[string]bool)
+	seenGeoIP := make(map[string]bool)
+	seenApp := make(map[string]bool)
+	seenDomain := make(map[string]bool)
+	actByDom := make(map[string]model.AppActivity)
+
+	var totalQuotaBytes, totalUsedBytes int64
+	var sshBreakdownPtr *model.SSHProtoUsageBreakdown
+
+	mergeMonitor := func(mon *model.MonitorEntry) {
+		if mon == nil {
+			return
+		}
+		for _, ap := range mon.ActiveProtocols {
+			if ap != "" && !seenActiveProto[ap] {
+				seenActiveProto[ap] = true
+				report.ActiveProtocols = append(report.ActiveProtocols, ap)
+			}
+		}
+		for _, tr := range mon.Transports {
+			if tr != "" && !seenTransport[tr] {
+				seenTransport[tr] = true
+				report.ActiveTransports = append(report.ActiveTransports, tr)
+			}
+		}
+		for _, ip := range mon.IPs {
+			if ip != "" && !seenIP[ip] {
+				seenIP[ip] = true
+				report.ConnectedIPs = append(report.ConnectedIPs, ip)
+			}
+		}
+		for _, isp := range mon.ISPs {
+			if isp != "" && !seenISP[isp] {
+				seenISP[isp] = true
+				report.ISPs = append(report.ISPs, isp)
+			}
+		}
+		for _, loc := range mon.Locations {
+			if loc.IP != "" && !seenGeoIP[loc.IP] {
+				seenGeoIP[loc.IP] = true
+				report.Locations = append(report.Locations, loc)
+			}
+		}
+		for _, app := range mon.AccessedApps {
+			if app != "" && !seenApp[app] {
+				seenApp[app] = true
+				report.AccessedApps = append(report.AccessedApps, app)
+			}
+		}
+		for _, dom := range mon.AccessedDomains {
+			if dom != "" && !seenDomain[dom] {
+				seenDomain[dom] = true
+				report.AccessedDomains = append(report.AccessedDomains, dom)
+			}
+		}
+		for _, act := range mon.AppActivities {
+			if prev, exists := actByDom[act.Domain]; exists {
+				prev.Hits += act.Hits
+				actByDom[act.Domain] = prev
+			} else {
+				actByDom[act.Domain] = act
+			}
+		}
+		report.Sessions = append(report.Sessions, mon.Sessions...)
+	}
+
+	now := time.Now()
+	for _, acc := range accounts {
+		report.DetectedProtocols = append(report.DetectedProtocols, acc.Protocol)
+
+		var monPtr *model.MonitorEntry
+		isOnline := false
+		if live, ok := liveByProto[acc.Protocol]; ok && live.IPCount > 0 {
+			liveCopy := live
+			monPtr = &liveCopy
+			isOnline = true
+		} else if fullMon, err := s.GetUserActivity(ctx, acc.Protocol, username); err == nil && fullMon != nil {
+			monPtr = fullMon
+			isOnline = fullMon.IPCount > 0
+		}
+
+		accCopy := *acc
+		if monPtr != nil && monPtr.UsedBytes > accCopy.UsedBytes {
+			accCopy.UsedBytes = monPtr.UsedBytes
+		}
+		if acc.Protocol == "ssh" && monPtr != nil && monPtr.SSHBreakdown != nil {
+			bdCopy := *monPtr.SSHBreakdown
+			sshBreakdownPtr = &bdCopy
+		}
+
+		totalQuotaBytes += accCopy.QuotaBytes
+		totalUsedBytes += accCopy.UsedBytes
+		if accCopy.LimitIP > report.IPLimit {
+			report.IPLimit = accCopy.LimitIP
+		}
+
+		if isOnline {
+			report.Online = true
+			if report.PrimaryProtocol == "" {
+				report.PrimaryProtocol = acc.Protocol
+			}
+			mergeMonitor(monPtr)
+		}
+
+		if report.AccountStatus == "" || (report.AccountStatus != "active" && accCopy.Status == "active" && !accCopy.IsExpired()) {
+			if accCopy.Status == "active" && accCopy.IsExpired() {
+				report.AccountStatus = "expired"
+			} else {
+				report.AccountStatus = accCopy.Status
+			}
+		}
+
+		daysRem := 0
+		if remHours := accCopy.ExpiredAt.Sub(now).Hours(); remHours > 0 {
+			daysRem = int((remHours + 23.999) / 24.0)
+		}
+
+		var cfgLink *model.ConfigLink
+		if xraySvc != nil {
+			if link, err := xraySvc.GetConfigLink(ctx, accCopy.Protocol, accCopy.Username, accCopy.Secret, domain); err == nil {
+				cfgLink = link
+			}
+		}
+
+		connIPs := []string{}
+		activeSubs := []string{}
+		transports := []string{}
+		activeIPCnt := 0
+		if monPtr != nil {
+			if monPtr.IPs != nil {
+				connIPs = monPtr.IPs
+			}
+			activeIPCnt = monPtr.IPCount
+			activeSubs = monPtr.ActiveProtocols
+			transports = monPtr.Transports
+		}
+
+		report.Accounts = append(report.Accounts, model.UserProtocolAccountDetail{
+			Protocol:           accCopy.Protocol,
+			Online:             isOnline,
+			Status:             accCopy.Status,
+			DaysRemaining:      daysRem,
+			ActiveIPCount:      activeIPCnt,
+			IPLimit:            accCopy.LimitIP,
+			ConnectedIPs:       connIPs,
+			ActiveSubProtocols: activeSubs,
+			Transports:         transports,
+			Account:            &accCopy,
+			Config:             cfgLink,
+			LiveMonitor:        monPtr,
+		})
+	}
+
+	// Also surface any live session whose OS/Xray user wasn't in SQLite yet
+	if len(accounts) == 0 {
+		for _, proto := range []string{"ssh", "vless", "vmess", "trojan", "noobz"} {
+			if live, ok := liveByProto[proto]; ok {
+				liveCopy := live
+				report.Online = report.Online || liveCopy.IPCount > 0
+				report.DetectedProtocols = append(report.DetectedProtocols, proto)
+				if report.PrimaryProtocol == "" {
+					report.PrimaryProtocol = proto
+				}
+				if report.AccountStatus == "" {
+					report.AccountStatus = "active"
+				}
+				totalUsedBytes += liveCopy.UsedBytes
+				totalQuotaBytes += liveCopy.QuotaBytes
+				if proto == "ssh" && liveCopy.SSHBreakdown != nil {
+					bdCopy := *liveCopy.SSHBreakdown
+					sshBreakdownPtr = &bdCopy
+				}
+				mergeMonitor(&liveCopy)
+			}
+		}
+	}
+
+	if report.PrimaryProtocol == "" && len(report.DetectedProtocols) > 0 {
+		report.PrimaryProtocol = report.DetectedProtocols[0]
+	}
+
+	for _, act := range actByDom {
+		report.AppActivities = append(report.AppActivities, act)
+	}
+	sort.Slice(report.AppActivities, func(i, j int) bool {
+		if report.AppActivities[i].Hits == report.AppActivities[j].Hits {
+			return report.AppActivities[i].Domain < report.AppActivities[j].Domain
+		}
+		return report.AppActivities[i].Hits > report.AppActivities[j].Hits
+	})
+
+	report.TotalActiveIPs = len(report.ConnectedIPs)
+	remBytes, pct := calcQuotaProgress(totalUsedBytes, totalQuotaBytes)
+	remHuman := "Unlimited"
+	if totalQuotaBytes > 0 {
+		remHuman = repository.FormatBytes(remBytes)
+	}
+	report.QuotaSummary = model.UserQuotaOverview{
+		QuotaBytes:     totalQuotaBytes,
+		QuotaHuman:     formatQuotaHuman(totalQuotaBytes),
+		UsedBytes:      totalUsedBytes,
+		UsedHuman:      repository.FormatBytes(totalUsedBytes),
+		RemainingBytes: remBytes,
+		RemainingHuman: remHuman,
+		UsagePercent:   pct,
+		SSHBreakdown:   sshBreakdownPtr,
+	}
+
+	return report, nil
 }
 
 // GetSSHAllProtocolQuota returns server-wide and per-user SSH quota across OpenSSH, Dropbear, SSH SSL/TLS, SSH-WS, SlowDNS, and OpenVPN!
