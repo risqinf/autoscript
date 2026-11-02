@@ -26,31 +26,70 @@ Enterprise-grade multi-protocol tunneling platform supporting **SSH All-Protocol
 
 ---
 
-## Extreme Rocky Linux 9 Auto-Tuning Profiles
+## Extreme Enterprise Linux 9 & 10 Auto-Tuning & `ulimit` Profiles
 
-| RAM Tier | Profile | ZRAM Swap | Nginx Conn/Worker | HAProxy Maxconn | API Max Concurrency | Daemon Caps |
+Every systemd service (`xray`, `api-server`, `dropbear`, `sshd`, `ssh-ws`, `nginx`, `haproxy`, `squid`, `noobzvpns`, `slowdns`, `openvpn-server@`, `dnsmasq`, and all quota/IP-limit daemons) is configured with strict zero-bottleneck `ulimit` ceilings:
+- **`LimitNOFILE=1048576`** (`open files -n`: 1,048,576; Squid `max_filedescriptors 65535`; Nginx `worker_rlimit_nofile >= 65535`)
+- **`LimitNPROC=65535`** & **`TasksMax=infinity`** (`max user processes -u`)
+- **`LimitMEMLOCK=infinity`**, **`LimitFSIZE=infinity`**, **`LimitDATA=infinity`**, **`LimitSTACK=infinity`**, **`LimitAS=infinity`**
+- **`LimitCORE=0`** (`core file size -c`: `0` — prevents crash core-dump disk I/O freezes on small SSD VPS nodes)
+
+| RAM Tier | Profile | ZRAM Swap | Nginx Conn/Worker | HAProxy Maxconn | API Max Concurrency | Daemon Memory Caps |
 |---|---|---|---|---|---|---|
-| **≤ 1.5 GB** | `1GB-EXTREME` | 75% RAM (`zstd`/`lzo-rle`) | 8,192 | 16,384 | 65,536 | Xray `180MiB`, API `96MiB`, SSH-WS `64MiB` |
-| **≤ 3 GB** | `2GB-OPTIMIZED` | 50% RAM | 16,384 | 32,768 | 262,144 | Xray `384MiB`, API `192MiB`, SSH-WS `128MiB` |
-| **≤ 6 GB** | `4GB-HIGH` | 50% RAM | 65,535 | 100,000 | 262,144 | Xray `768MiB`, API `384MiB`, SSH-WS `256MiB` |
-| **> 6 GB** | `8GB+-ENTERPRISE` | 2,048 MB | 131,072 | 200,000 | 1,048,576 | Uncapped / Enterprise |
+| **≤ 1.5 GB** | `1GB-EXTREME` | 50% RAM (`lz4`/`zstd`) | 4,096 (`rlimit 65535`) | 8,192 | 65,536 | Xray `220MiB`, API `96MiB`, SSH-WS `96MiB` |
+| **≤ 2.5 GB** | `2GB-OPTIMIZED` | 50% RAM | 16,384 (`rlimit 65535`) | 32,768 | 262,144 | Xray `512MiB`, API `192MiB`, SSH-WS `192MiB` |
+| **≤ 5 GB** | `4GB-HIGH` | 35% RAM | 65,535 (`rlimit 66559`) | 100,000 | 262,144 | Xray `1536MiB`, API `512MiB`, SSH-WS `384MiB` |
+| **> 5 GB** | `8GB+-ENTERPRISE` | 25% RAM | 131,072 (`rlimit 132096`) | 200,000 | 1,048,576 | Xray `3072MiB`, API `1024MiB`, SSH-WS `512MiB` |
 
 ---
 
-## Port Specifications
+## Complete Protocol, Transport & Port Specifications
 
-| Service | Port / Protocol | Forwarding / Backend | Description |
-|---|---|---|---|
-| **OpenSSH** | `22`, `3303` / TCP | Direct | OpenSSH Direct Tunnel & Admin |
-| **Dropbear** | `109`, `143` / TCP | Direct / Internal | Dropbear SSH Backend |
-| **HTTP Multiplexer** | `80`, `8080`, `8880`, `2052`, `2082`, `2086`, `2095` / TCP | HAProxy → Nginx (`:81`) | HTTP WS, HTTPUpgrade, XHTTP, REST API |
-| **HTTPS / TLS Multiplexer** | `443`, `8443`, `2053`, `2083`, `2087`, `2096` / TCP | HAProxy → Nginx (`:81` H1 / `:82` H2) / `:109` | Direct SSH SSL/TLS, Xray TLS/gRPC, REST API |
-| **SSH WebSocket Direct** | `8888` / TCP | `ssh-ws` daemon → `:109` | GO-TUNNEL PRO WebSocket |
-| **SlowDNS (DNSTT)** | `53`, `5300` / UDP | `dnstt-server` → `:109` | DNS Stealth Tunnel |
-| **OpenVPN** | `1194` / TCP (`2200` UDP) | `openvpn-server` | OpenVPN Tunnel (Status v2 Quota Tracked) |
-| **Squid Proxy** | `3128`, `8000` / TCP | Localhost-restricted | Hardened Non-Open HTTP Proxy |
-| **NoobzVPN** | `8585` / TCP | `noobzvpns` & Nginx `/noobz` | NoobzVPN TCP & WebSocket |
-| **BadVPN / UDPGW** | `7100`, `7200`, `7300` / UDP | `ssh-ws` UDPGW | Gaming & VoIP UDP Relay |
+### 1. SSH All-Protocol, OpenVPN, NoobzVPN, Proxy & UDP Relay Matrix
+
+| Protocol / Service | Network / Security | Public Port(s) | Path / Endpoint | Internal Routing / Backend | Quota & Live Monitor |
+|---|---|---|---|---|---|
+| **OpenSSH Direct** | Raw SSH (`TCP`) | `22`, `3303` / TCP | Direct SSH | `sshd.service` (`00-autoscript.conf`, `PermitTTY no`) | Tracked (`openssh`) |
+| **Dropbear 2019.78 Direct** | Raw SSH (`TCP`) | `109`, `143` / TCP | Direct SSH (`SSH-2.0-dropbear_2019.78`) | `dropbear.service` (Prebuilt Hardened Static) | Tracked (`dropbear`) |
+| **Direct SSH SSL/TLS** *(Stunnel Mode)* | `TLS 1.2 / 1.3` (`TCP`) | `443`, `8443` / TCP *(+ CDN TLS: `2053, 2083, 2087, 2096`)* | Raw SSH over TLS (SNI) | HAProxy `:443/:8443` TLS → `127.0.0.1:109` (Dropbear) | Tracked (`ssh_ssl`) |
+| **SSH WebSocket HTTP** *(Payload / CDN)* | `WS` (`HTTP` / `none`) | `80`, `8080`, `8888` / TCP *(+ Firewall/CDN HTTP: `8880, 2052, 2082, 2086, 2095`)* | `/ssh` or `/` *(Injector Payload)* | HAProxy `:80/:8080` → Nginx `:81` → `ssh-ws` (`:8888`) → `:109` | Tracked (`ssh_ws`) |
+| **SSH WebSocket TLS (WSS)** | `WSS` (`TLS 1.2 / 1.3`) | `443`, `8443` / TCP *(+ Firewall/CDN HTTPS: `2053, 2083, 2087, 2096`)* | `/ssh` or `/` *(Payload without `Sec-WebSocket-Key`)* | HAProxy `:443/:8443` TLS → Nginx `:81` → `ssh-ws` (`:8888`) → `:109` | Tracked (`ssh_ws`) |
+| **SlowDNS (DNSTT)** | Noise `Curve25519` over `UDP` DNS | `53` *(NAT → `5300`)*, `5300` / UDP | NS Subdomain (`ns.<domain>`) | `dnstt-server` (`:5300/udp`) → `127.0.0.1:109` (Dropbear) | Tracked (`slowdns`) |
+| **OpenVPN TCP / UDP** | `TLS` (`AES-128/256-GCM`, `SHA256`) | `1194` / TCP *(+ Firewall ready: `1194, 2200` / UDP)* | `https://<domain>/risqinf/openvpn/tcp.ovpn` | `openvpn-server@server-tcp-1194` (`10.9.0.0/24`) | Tracked (`openvpn`) |
+| **NoobzVPN Direct TCP** | Custom TCP Framing | `8585` / TCP | `<domain>:8585@user:pass` | `noobzvpns.service` (`:8585`) | Tracked (`noobz`) |
+| **NoobzVPN WebSocket (HTTP & TLS)** | `WS` / `WSS` (`HTTP/1.1` & `H2`) | HTTP: `80, 8080` · TLS: `443, 8443` / TCP | `/noobz` or `/noobz-ws` | HAProxy → Nginx (`:81` / `:82`) → `127.0.0.1:8585` | Tracked (`noobz`) |
+| **Squid HTTP Proxy** | `HTTP CONNECT` | `3128` *(+ Firewall `8000`)* / TCP | Proxy to VPS IP/Domain only | `squid.service` (`max_filedescriptors 65535`, anti-open-proxy ACL) | Via target SSH daemon |
+| **BadVPN UDPGW** | UDP-over-SSH `direct-tcpip` | `7100`, `7200`, `7300` / UDP & Loopback TCP | `127.0.0.1:7300` (inside SSH tunnel) | Built-in `ssh-ws` UDPGW relay (allowed through Dropbear SSRF filter) | Included in SSH session |
+
+### 2. Xray-Core (`v25.10.15`) Multi-Transport Matrix (VLESS, VMESS & Trojan)
+
+All Xray protocols share unified TLS termination on `:443` / `:8443` (ALPN `h2, http/1.1`) and plain HTTP `:80` / `:8080` via HAProxy + Nginx, with BitTorrent & RFC1918/Loopback SSRF outbound blocking enabled by default:
+
+| Protocol | Transport (`network`) | Security | Public Port(s) | Path / `serviceName` | Xray Inbound Tag & Loopback Port |
+|---|---|---|---|---|---|
+| **VLESS** | `ws` (WebSocket) | `tls` & `none` | TLS: `443, 8443` *(CDN: `2053, 2083, 2087, 2096`)* · HTTP: `80, 8080` *(CDN: `8880, 2052, 2082, 2086, 2095`)* | Path: `/vless` | `vless-ws` (`127.0.0.1:1`) |
+| **VLESS** | `httpupgrade` | `tls` (H1/H2) & `none` | TLS: `443, 8443` · HTTP: `80, 8080` | Path: `/vless-hu` | `vless-hu` (`127.0.0.1:10011`) |
+| **VLESS** | `xhttp` (SplitHTTP `auto`) | `tls` (H1/H2) & `none` | TLS: `443, 8443` · HTTP: `80, 8080` | Path: `/vless-xhttp` | `vless-xhttp` (`127.0.0.1:10021`) |
+| **VLESS** | `grpc` (HTTP/2 Gun) | `tls` (ALPN `h2`) | TLS: `443, 8443` | `serviceName`: `vless-grpc` | `vless-grpc` (`127.0.0.1:10031`) |
+| **VMESS** | `ws` (WebSocket Multipath) | `tls` & `none` | TLS: `443, 8443` *(CDN: `2053..2096`)* · HTTP: `80, 8080` *(CDN: `8880, 2052..2095`)* | Path: `/` or `/vmess` *(any path with `Sec-WebSocket-Key`)* | `vmess-ws` (`127.0.0.1:3`) |
+| **VMESS** | `httpupgrade` | `tls` (H1/H2) & `none` | TLS: `443, 8443` · HTTP: `80, 8080` | Path: `/vmess-hu` | `vmess-hu` (`127.0.0.1:10013`) |
+| **VMESS** | `xhttp` (SplitHTTP `auto`) | `tls` (H1/H2) & `none` | TLS: `443, 8443` · HTTP: `80, 8080` | Path: `/vmess-xhttp` | `vmess-xhttp` (`127.0.0.1:10023`) |
+| **VMESS** | `grpc` (HTTP/2 Gun) | `tls` (ALPN `h2`) | TLS: `443, 8443` | `serviceName`: `vmess-grpc` | `vmess-grpc` (`127.0.0.1:10033`) |
+| **Trojan** | `ws` (WebSocket) | `tls` & `none` | TLS: `443, 8443` *(CDN: `2053..2096`)* · HTTP: `80, 8080` | Path: `/trojan` | `trojan-ws` (`127.0.0.1:2`) |
+| **Trojan** | `httpupgrade` | `tls` (H1/H2) & `none` | TLS: `443, 8443` · HTTP: `80, 8080` | Path: `/trojan-hu` | `trojan-hu` (`127.0.0.1:10012`) |
+| **Trojan** | `xhttp` (SplitHTTP `auto`) | `tls` (H1/H2) & `none` | TLS: `443, 8443` · HTTP: `80, 8080` | Path: `/trojan-xhttp` | `trojan-xhttp` (`127.0.0.1:10022`) |
+| **Trojan** | `grpc` (HTTP/2 Gun) | `tls` (ALPN `h2`) | TLS: `443, 8443` | `serviceName`: `trojan-grpc` | `trojan-grpc` (`127.0.0.1:10032`) |
+
+### 3. Enterprise REST API & Internal Control Plane (`127.0.0.1` Isolated)
+
+| Component | Bind / Public Access | Purpose & Security Isolation |
+|---|---|---|
+| **Enterprise REST API (Public)** | `https://<domain>/api/*` (`:443, :8443` H1/H2 & `:80, :8080`) | Reverse-proxied via HAProxy → Nginx (`upstream api_backend` keepalive 256, `proxy_next_upstream off`) |
+| **`autoscript-api` Daemon** | `127.0.0.1:9000` | Protected by 5-Layer SHA-256 + HMAC-SHA256, firewall-closed externally, blocked from tunnel UIDs & Dropbear SSRF |
+| **Nginx Reverse Proxy** | `127.0.0.1:81` (HTTP/1.1) & `127.0.0.1:82` (HTTP/2) | `proxy_protocol` listeners fed exclusively by local HAProxy |
+| **Xray StatsService gRPC** | `127.0.0.1:10085` | Per-user uplink/downlink byte counters (`dokodemo-door` `api` tag) |
+| **SSH-WS Metrics API** | `127.0.0.1:8081` | Local session & UDPGW telemetry for `ssh-ws` |
+| **DNS Sniffer Cache (`dnsmasq`)** | `127.0.0.1:5353` | Real-time IP-to-domain correlation for connected user app detection |
 
 ---
 

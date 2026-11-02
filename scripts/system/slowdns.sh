@@ -100,7 +100,13 @@ NoNewPrivileges=true
 ExecStart=${SLOWDNS_BIN} -udp :5300 -privkey-file ${SLOWDNS_KEY} ${ns} 127.0.0.1:109
 Restart=always
 RestartSec=1s
-LimitNOFILE=262144
+LimitNOFILE=1048576
+LimitNPROC=65535
+LimitMEMLOCK=infinity
+LimitFSIZE=infinity
+LimitAS=infinity
+LimitCORE=0
+TasksMax=infinity
 
 [Install]
 WantedBy=multi-user.target

@@ -27,6 +27,11 @@ Environment=XRAY_BIN=/usr/local/bin/xray
 # Performance & Security
 LimitNOFILE=1048576
 LimitNPROC=65535
+LimitMEMLOCK=infinity
+LimitFSIZE=infinity
+LimitAS=infinity
+LimitCORE=0
+TasksMax=infinity
 NoNewPrivileges=false
 
 [Install]

@@ -226,7 +226,13 @@ KillMode=process
 ExecStart=/usr/sbin/dropbear -F -w -g -K 60 -I 300 -T 5 -p 109 -p 143 -b /etc/issue.net -r /etc/dropbear/dropbear_rsa_host_key -r /etc/dropbear/dropbear_ecdsa_host_key -W 65536
 Restart=always
 RestartSec=1s
-LimitNOFILE=524288
+LimitNOFILE=1048576
+LimitNPROC=65535
+LimitMEMLOCK=infinity
+LimitFSIZE=infinity
+LimitAS=infinity
+LimitCORE=0
+TasksMax=infinity
 
 [Install]
 WantedBy=multi-user.target

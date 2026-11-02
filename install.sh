@@ -110,6 +110,7 @@ detect_resources() {
   # (cap so cores*conn doesn't exceed the system fd ceiling unreasonably).
   NGX_WORKERS=$CPU_CORES
   NGX_RLIMIT=$((NGX_CONN + 1024))
+  ((NGX_RLIMIT < 65535)) && NGX_RLIMIT=65535
   # System-wide fd ceiling for the file-max sysctl.
   FILE_MAX=$(((NGX_CONN * CPU_CORES) + 100000))
   ((FILE_MAX < 262144)) && FILE_MAX=262144
@@ -613,7 +614,13 @@ KillMode=process
 ExecStart=/usr/sbin/dropbear -F -w -g -K 60 -I 300 -T 5 -p 109 -p 143 -b /etc/issue.net -r /etc/dropbear/dropbear_rsa_host_key -r /etc/dropbear/dropbear_ecdsa_host_key -W 65536
 Restart=always
 RestartSec=1s
-LimitNOFILE=524288
+LimitNOFILE=1048576
+LimitNPROC=65535
+LimitMEMLOCK=infinity
+LimitFSIZE=infinity
+LimitAS=infinity
+LimitCORE=0
+TasksMax=infinity
 
 [Install]
 WantedBy=multi-user.target
@@ -724,7 +731,13 @@ ExecStart=/usr/local/bin/ssh-ws -b 0.0.0.0 -p 8888 -t 127.0.0.1:109 \
   -l /var/log/ssh-ws.log --auth-log /var/log/secure --api-port 8081
 Restart=always
 RestartSec=1s
-LimitNOFILE=1000000
+LimitNOFILE=1048576
+LimitNPROC=65535
+LimitMEMLOCK=infinity
+LimitFSIZE=infinity
+LimitAS=infinity
+LimitCORE=0
+TasksMax=infinity
 
 [Install]
 WantedBy=multi-user.target
@@ -1256,10 +1269,12 @@ ExecReload=/bin/kill -HUP \$MAINPID
 Restart=always
 RestartSec=1s
 
-# Resource Limits
+# Resource Limits (No artificial ulimit or core-dump bottlenecks)
 LimitNOFILE=1048576
-LimitNPROC=1048576
-LimitCORE=infinity
+LimitNPROC=65535
+LimitFSIZE=infinity
+LimitAS=infinity
+LimitCORE=0
 TasksMax=infinity
 
 # Network Tuning
@@ -2431,6 +2446,7 @@ http_access allow localhost
 http_access deny all
 
 http_port 3128
+max_filedescriptors 65535
 cache deny all
 cache_mem 0 MB
 logfile_rotate 0
@@ -2545,7 +2561,13 @@ User=root
 Type=simple
 WorkingDirectory=/etc/noobzvpns
 TimeoutStopSec=1
-LimitNOFILE=infinity
+LimitNOFILE=1048576
+LimitNPROC=65535
+LimitMEMLOCK=infinity
+LimitFSIZE=infinity
+LimitAS=infinity
+LimitCORE=0
+TasksMax=infinity
 ExecStart=/usr/bin/noobzvpns start-server
 Restart=always
 RestartSec=3

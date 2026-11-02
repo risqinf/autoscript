@@ -331,6 +331,12 @@ RestartSec=1s
 TimeoutStopSec=20
 OOMScoreAdjust=-900
 LimitNOFILE=1048576
+LimitNPROC=65535
+LimitMEMLOCK=infinity
+LimitFSIZE=infinity
+LimitAS=infinity
+LimitCORE=0
+TasksMax=infinity
 
 [Install]
 WantedBy=multi-user.target

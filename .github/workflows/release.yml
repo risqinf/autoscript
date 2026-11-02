@@ -212,22 +212,20 @@ jobs:
   build-dropbear:
     name: Build Dropbear 2019.78 (${{ matrix.label }})
     needs: prepare
-    runs-on: ubuntu-latest
+    runs-on: ${{ matrix.runner }}
     strategy:
       fail-fast: false
       matrix:
         include:
           - platform: linux/amd64
             label: linux-amd64
+            runner: ubuntu-latest
           - platform: linux/arm64
             label: linux-arm64
+            runner: ubuntu-24.04-arm
 
     steps:
       - uses: actions/checkout@v4
-
-      - name: Set up QEMU for multi-arch static build
-        if: matrix.platform != 'linux/amd64'
-        uses: docker/setup-qemu-action@v3
 
       - name: Build Static Hardened Dropbear 2019.78
         run: |

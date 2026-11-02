@@ -308,31 +308,65 @@ EOF
     echo $(( CONNTRACK_MAX / 4 )) > /sys/module/nf_conntrack/parameters/hashsize 2>/dev/null || true
   fi
 
-  # System-wide PAM & systemd file descriptor ceilings
-  mkdir -p /etc/security/limits.d /etc/systemd/system.conf.d
+  # System-wide PAM, shell & systemd ulimit ceilings (>= 65535 NPROC / 1048576 NOFILE, 0 core-dump stall)
+  mkdir -p /etc/security/limits.d /etc/systemd/system.conf.d /etc/systemd/user.conf.d /etc/profile.d
   cat >/etc/security/limits.d/99-autoscript.conf <<'EOF'
-* soft nofile 1048576
-* hard nofile 1048576
-root soft nofile 1048576
-root hard nofile 1048576
-* soft nproc 65535
-* hard nproc 65535
+*    soft nofile  1048576
+*    hard nofile  1048576
+root soft nofile  1048576
+root hard nofile  1048576
+*    soft nproc   65535
+*    hard nproc   65535
+root soft nproc   unlimited
+root hard nproc   unlimited
+*    soft memlock unlimited
+*    hard memlock unlimited
+root soft memlock unlimited
+root hard memlock unlimited
+*    soft fsize   unlimited
+*    hard fsize   unlimited
+*    soft data    unlimited
+*    hard data    unlimited
+*    soft stack   unlimited
+*    hard stack   unlimited
+*    soft core    0
+*    hard core    0
+root soft core    0
+root hard core    0
 EOF
+
+  cat >/etc/profile.d/99-autoscript-ulimit.sh <<'EOF'
+# Autoscript Enterprise Shell ulimit Guard
+ulimit -n 1048576 2>/dev/null || ulimit -n 65535 2>/dev/null || true
+ulimit -u 65535 2>/dev/null || true
+ulimit -c 0 2>/dev/null || true
+ulimit -l unlimited 2>/dev/null || true
+ulimit -f unlimited 2>/dev/null || true
+EOF
+  chmod 0644 /etc/profile.d/99-autoscript-ulimit.sh
 
   cat >/etc/systemd/system.conf.d/99-autoscript-limits.conf <<'EOF'
 [Manager]
 DefaultLimitNOFILE=1048576
-DefaultTasksMax=65535
+DefaultLimitNPROC=65535
+DefaultLimitMEMLOCK=infinity
+DefaultLimitFSIZE=infinity
+DefaultLimitDATA=infinity
+DefaultLimitSTACK=infinity
+DefaultLimitAS=infinity
+DefaultLimitCORE=0
+DefaultTasksMax=infinity
 EOF
+  cp -f /etc/systemd/system.conf.d/99-autoscript-limits.conf /etc/systemd/user.conf.d/99-autoscript-limits.conf 2>/dev/null || true
 
-  log_ok "Kernel sysctl, BBR, conntrack (${CONNTRACK_MAX}), and FD limits (1,048,576) applied."
+  log_ok "Kernel sysctl, BBR, conntrack (${CONNTRACK_MAX}), and full ulimit ceilings (NOFILE=1048576, NPROC=65535, CORE=0, MEMLOCK=infinity) applied."
 }
 
 # ---------------------------------------------------------------------------
 # 5. Go Runtime Memory Bounds (GOMEMLIMIT / GOGC) & Squid Zero-Cache Lock
 # ---------------------------------------------------------------------------
 apply_daemon_memory_caps() {
-  # Xray memory cap + ray buffer optimization + zero-downtime restart resilience
+  # Xray memory cap + ray buffer optimization + full ulimit & zero-downtime resilience
   mkdir -p /etc/systemd/system/xray.service.d
   cat >/etc/systemd/system/xray.service.d/10-memory-tuning.conf <<EOF
 [Unit]
@@ -342,12 +376,21 @@ StartLimitIntervalSec=0
 Environment="GOMEMLIMIT=${XRAY_MEMLIMIT}"
 Environment="GOGC=${XRAY_GOGC}"
 Environment="XRAY_RAY_BUFFER_SIZE=${XRAY_BUF_SIZE}"
+LimitNOFILE=1048576
+LimitNPROC=65535
+LimitMEMLOCK=infinity
+LimitFSIZE=infinity
+LimitDATA=infinity
+LimitSTACK=infinity
+LimitAS=infinity
+LimitCORE=0
+TasksMax=infinity
 Restart=always
 RestartSec=1s
 OOMScoreAdjust=-500
 EOF
 
-  # API Server memory cap, OOM killer immunity & zero-downtime resilience
+  # API Server memory cap, OOM killer immunity, full ulimit & zero-downtime resilience
   mkdir -p /etc/systemd/system/api-server.service.d
   cat >/etc/systemd/system/api-server.service.d/10-memory-tuning.conf <<EOF
 [Unit]
@@ -356,12 +399,21 @@ StartLimitIntervalSec=0
 [Service]
 Environment="GOMEMLIMIT=${API_MEMLIMIT}"
 Environment="GOGC=${API_GOGC}"
+LimitNOFILE=1048576
+LimitNPROC=65535
+LimitMEMLOCK=infinity
+LimitFSIZE=infinity
+LimitDATA=infinity
+LimitSTACK=infinity
+LimitAS=infinity
+LimitCORE=0
+TasksMax=infinity
 Restart=always
 RestartSec=1s
 OOMScoreAdjust=-900
 EOF
 
-  # SSH-WS proxy memory cap & resilience
+  # SSH-WS proxy memory cap, full ulimit & resilience
   mkdir -p /etc/systemd/system/ssh-ws.service.d
   cat >/etc/systemd/system/ssh-ws.service.d/10-memory-tuning.conf <<EOF
 [Unit]
@@ -370,20 +422,56 @@ StartLimitIntervalSec=0
 [Service]
 Environment="GOMEMLIMIT=${SSHWS_MEMLIMIT}"
 Environment="GOGC=${API_GOGC}"
+LimitNOFILE=1048576
+LimitNPROC=65535
+LimitMEMLOCK=infinity
+LimitFSIZE=infinity
+LimitDATA=infinity
+LimitSTACK=infinity
+LimitAS=infinity
+LimitCORE=0
+TasksMax=infinity
 Restart=always
 RestartSec=1s
 EOF
 
-  # Dropbear zero-downtime burst resilience
-  mkdir -p /etc/systemd/system/dropbear.service.d
-  cat >/etc/systemd/system/dropbear.service.d/10-resilience.conf <<EOF
+  # Enforce full ulimit (>= 65535 NPROC, 1048576 NOFILE, 0 CORE, infinity MEMLOCK/FSIZE/AS)
+  # across ALL tunnel, proxy, DNS, OpenVPN, Squid, and quota daemons
+  local svc_unit
+  for svc_unit in \
+    dropbear.service \
+    sshd.service \
+    nginx.service \
+    haproxy.service \
+    squid.service \
+    noobzvpns.service \
+    slowdns.service \
+    dnsmasq.service \
+    openvpn-server@.service \
+    quota-ssh.service \
+    quota.service \
+    quota-trojan.service \
+    quota-vmess.service \
+    limit-ip-vless.service \
+    limit-ip-trojan.service \
+    limit-ip-vmess.service; do
+    mkdir -p "/etc/systemd/system/${svc_unit}.d"
+    cat >"/etc/systemd/system/${svc_unit}.d/10-ulimit-resilience.conf" <<'UEOF'
 [Unit]
 StartLimitIntervalSec=0
 
 [Service]
-Restart=always
-RestartSec=1s
-EOF
+LimitNOFILE=1048576
+LimitNPROC=65535
+LimitMEMLOCK=infinity
+LimitFSIZE=infinity
+LimitDATA=infinity
+LimitSTACK=infinity
+LimitAS=infinity
+LimitCORE=0
+TasksMax=infinity
+UEOF
+  done
 
   # Optimize Squid to zero disk/object cache & strict VPS-only destination ACL (anti-open-proxy!)
   if [[ -f /etc/squid/squid.conf ]]; then
@@ -407,6 +495,7 @@ $( [[ -n "$domain" && "$domain" != "notset" ]] && echo "http_access allow to_vps
 http_access deny all
 
 http_port 3128
+max_filedescriptors 65535
 cache deny all
 cache_mem 8 MB
 maximum_object_size 0 KB
