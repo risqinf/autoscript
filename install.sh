@@ -246,7 +246,7 @@ sleep 1
 enable_el_repositories
 
 print_info "Installing core dependencies..."
-dnf install -y wget curl openssl sudo binutils coreutils gnupg2 bc htop lsof jq sqlite tar gzip bzip2 xz unzip python3 util-linux policycoreutils policycoreutils-python-utils
+dnf install -y wget curl openssl sudo binutils coreutils gnupg2 bc htop lsof jq sqlite tar gzip bzip2 xz unzip python3 util-linux policycoreutils policycoreutils-python-utils >/dev/null 2>&1
 dnf install -y vnstat ruby rubygems >/dev/null 2>&1 || true
 command -v gem >/dev/null 2>&1 && gem install lolcat >/dev/null 2>&1 || true
 if systemctl list-unit-files vnstat.service >/dev/null 2>&1; then
@@ -299,8 +299,8 @@ if [[ -f /etc/ssh/sshd_config ]]; then
   sed -i 's/^#*PasswordAuthentication.*/PasswordAuthentication yes/g' /etc/ssh/sshd_config
   sed -i 's/^#*PermitRootLogin.*/PermitRootLogin yes/g' /etc/ssh/sshd_config
 fi
-systemctl daemon-reload
-systemctl restart sshd
+systemctl daemon-reload >/dev/null 2>&1
+systemctl restart sshd >/dev/null 2>&1
 print_success "OpenSSH hardened & active on ports 22 and 3303."
 
 # Register the nologin shell so PAM (pam_shells) accepts tunneling accounts.
@@ -318,12 +318,12 @@ print_success "nologin shell registered."
 # login-checker scripts (which read /var/log/secure) and the ssh-ws auth-log
 # monitor get no data. Dropbear logs via syslog (authpriv) once -E is dropped.
 print_info "Configuring rsyslog for /var/log/secure..."
-dnf install rsyslog -y
+dnf install rsyslog -y >/dev/null 2>&1
 if ! grep -rqs 'authpriv\.\*' /etc/rsyslog.conf /etc/rsyslog.d/ 2>/dev/null; then
   echo 'authpriv.*    /var/log/secure' >/etc/rsyslog.d/00-autoscript-secure.conf
 fi
-systemctl enable rsyslog --now
-systemctl restart rsyslog
+systemctl enable rsyslog --now >/dev/null 2>&1
+systemctl restart rsyslog >/dev/null 2>&1
 print_success "rsyslog active (authpriv -> /var/log/secure)."
 
 # Make A Directory
@@ -343,7 +343,7 @@ REPO_TARBALL="https://github.com/${REPO_OWNER}/${REPO_NAME}/archive/refs/heads/$
 
 menu_install_logic() {
   print_info "Downloading management menu..."
-  dnf install tar gzip -y
+  dnf install tar gzip -y >/dev/null 2>&1
 
   local tmpdir
   tmpdir=$(mktemp -d)
@@ -392,10 +392,18 @@ menu_install_logic() {
     install -m 0755 "$srcdir/scripts/build/build-dropbear-2019.sh" /usr/local/share/autoscript/build/build-dropbear-2019.sh
   fi
 
-  # Install the API & Uninstaller helper commands
+  # Install the API, Uninstaller & Updater helper commands
   [[ -f "$srcdir/install-api.sh" ]] && install -m 0755 "$srcdir/install-api.sh" /usr/local/sbin/install-api
   [[ -f "$srcdir/uninstall-api.sh" ]] && install -m 0755 "$srcdir/uninstall-api.sh" /usr/local/sbin/uninstall-api
   [[ -f "$srcdir/uninstall.sh" ]] && install -m 0755 "$srcdir/uninstall.sh" /usr/local/sbin/uninstall
+  if [[ -f "$srcdir/update.sh" ]]; then
+    install -m 0755 "$srcdir/update.sh" /usr/local/sbin/update
+  elif [[ -f "$srcdir/scripts/system/update.sh" ]]; then
+    install -m 0755 "$srcdir/scripts/system/update.sh" /usr/local/sbin/update
+  fi
+  ln -sf /usr/local/sbin/update /usr/local/sbin/update-script 2>/dev/null || true
+  ln -sf /usr/local/sbin/update /usr/local/sbin/autoscript-update 2>/dev/null || true
+  [[ -f "$srcdir/VERSION" ]] && cp -f "$srcdir/VERSION" /usr/local/sbin/VERSION 2>/dev/null || true
 
   rm -rf "$tmpdir"
   print_success "Menu scripts and libraries integrated."
@@ -2003,8 +2011,8 @@ Persistent=true
 WantedBy=timers.target
 EOF
 
-systemctl daemon-reload
-systemctl enable --now autoexpire.timer limit-ip-ssh.timer backup.timer fixlog.timer
+systemctl daemon-reload >/dev/null 2>&1
+systemctl enable --now autoexpire.timer limit-ip-ssh.timer backup.timer fixlog.timer >/dev/null 2>&1
 
 # Install Speedtest CLI securely (direct HTTPS archive, zero curl|bash repo script)
 install_speedtest_secure() {
@@ -2138,10 +2146,10 @@ User=root
 WantedBy=multi-user.target
 EOF
 
-systemctl daemon-reload
-systemctl enable quota-ssh quota limit-ip-vless --now
-systemctl enable quota-trojan limit-ip-trojan --now
-systemctl enable quota-vmess limit-ip-vmess --now
+systemctl daemon-reload >/dev/null 2>&1
+systemctl enable quota-ssh quota limit-ip-vless --now >/dev/null 2>&1
+systemctl enable quota-trojan limit-ip-trojan --now >/dev/null 2>&1
+systemctl enable quota-vmess limit-ip-vmess --now >/dev/null 2>&1
 for svc in quota-ssh quota limit-ip-vless quota-trojan limit-ip-trojan quota-vmess limit-ip-vmess; do
   check_service "$svc" || print_warn "Looping service '$svc' not active (will retry via Restart=on-failure)."
 done
@@ -2159,7 +2167,7 @@ api_server_install_logic() {
   # Fallback manual install
   if ! command -v go &>/dev/null; then
     print_info "Installing Go..."
-    dnf install -y golang
+    dnf install -y golang >/dev/null 2>&1
   fi
 
   API_DIR="${script_dir}/files"
@@ -2184,8 +2192,8 @@ api_server_install_logic() {
 
   cp "$API_DIR/api-server.service" /etc/systemd/system/api-server.service
   chmod 644 /etc/systemd/system/api-server.service
-  systemctl daemon-reload
-  systemctl enable api-server --now
+  systemctl daemon-reload >/dev/null 2>&1
+  systemctl enable api-server --now >/dev/null 2>&1
 
   local token; token=$(sqlite3 /etc/api/api.db "SELECT token FROM tokens LIMIT 1;" 2>/dev/null || true)
   [[ -z "$token" && -f /etc/api/key ]] && token=$(cat /etc/api/key)
@@ -2284,7 +2292,7 @@ ovpn_install_logic() {
   echo "=================================================="
   WEB_DIR="/var/www/html/risqinf/openvpn"
   EASYRSA_DIR="/etc/openvpn/easy-rsa"
-  dnf install -y openvpn easy-rsa
+  dnf install -y openvpn easy-rsa >/dev/null 2>&1
   dnf install -y iptables-nft >/dev/null 2>&1 || dnf install -y iptables-services >/dev/null 2>&1 || true
   mkdir -p $WEB_DIR
   mkdir -p $EASYRSA_DIR
@@ -2403,13 +2411,13 @@ EOF
   # Routing & Firewall
   echo 1 >/proc/sys/net/ipv4/ip_forward
   sed -i 's/#net.ipv4.ip_forward=1/net.ipv4.ip_forward=1/g' /etc/sysctl.conf
-  sysctl -p
-  firewall-cmd --zone=public --add-port=1194/tcp --permanent
-  firewall-cmd --add-masquerade --permanent
-  firewall-cmd --reload
+  sysctl -p >/dev/null 2>&1
+  firewall-cmd --zone=public --add-port=1194/tcp --permanent >/dev/null 2>&1 || true
+  firewall-cmd --add-masquerade --permanent >/dev/null 2>&1 || true
+  firewall-cmd --reload >/dev/null 2>&1 || true
 
-  systemctl enable openvpn-server@server-tcp-1194
-  systemctl restart openvpn-server@server-tcp-1194
+  systemctl enable openvpn-server@server-tcp-1194 >/dev/null 2>&1
+  systemctl restart openvpn-server@server-tcp-1194 >/dev/null 2>&1
   check_service "openvpn-server@server-tcp-1194" || print_warn "OpenVPN TCP not active."
 }
 

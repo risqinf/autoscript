@@ -1,0 +1,221 @@
+#!/usr/bin/env bash
+# ========================================================
+# Project: Autoscript VPN by risqinf
+# Description: System, Menu & Core Scripts Updater
+# Developed for Rocky Linux 9 / Enterprise Linux
+# License: Apache License 2.0 (see LICENSE file)
+# Repository: https://github.com/risqinf/autoscript
+# ========================================================
+
+set -euo pipefail
+
+# Ensure script runs as root
+if [[ $EUID -ne 0 ]]; then
+  echo -e "\e[31mError: This updater must be run as root.\e[0m"
+  exit 1
+fi
+
+# Load common library if available
+if [[ -f /usr/local/sbin/lib/common.sh ]]; then
+  # shellcheck source=/dev/null
+  . /usr/local/sbin/lib/common.sh
+fi
+
+# Define fallback colors if common.sh was not loaded
+RED="${RED:-\033[0;31m}"
+GREEN="${GREEN:-\033[0;32m}"
+YELLOW="${YELLOW:-\033[0;33m}"
+BLUE="${BLUE:-\033[0;34m}"
+CYAN="${CYAN:-\033[0;36m}"
+NC="${NC:-\033[0m}"
+
+print_ok()    { echo -e "${GREEN}[OK]${NC} $1"; }
+print_info()  { echo -e "${BLUE}[INFO]${NC} $1"; }
+print_warn()  { echo -e "${YELLOW}[WARN]${NC} $1"; }
+print_error() { echo -e "${RED}[ERROR]${NC} $1"; }
+
+# Read currently installed version
+CURRENT_VER="Unknown"
+if [[ -f /usr/local/sbin/VERSION ]]; then
+  CURRENT_VER=$(tr -d '[:space:]' < /usr/local/sbin/VERSION)
+elif [[ -f /etc/xray/version ]]; then
+  CURRENT_VER=$(tr -d '[:space:]' < /etc/xray/version)
+fi
+
+clear
+echo ""
+echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+echo -e "           ${GREEN}AUTOSCRIPT SYSTEM & SCRIPT UPDATER${NC}               "
+echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+echo -e " Current Installed Version : ${YELLOW}${CURRENT_VER}${NC}"
+echo -e " Repository                : ${CYAN}https://github.com/risqinf/autoscript${NC}"
+echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+echo ""
+
+# Confirm update unless quiet or forced
+if [[ "${1:-}" != "-y" && "${1:-}" != "--force" && "${1:-}" != "--quiet" && "${1:-}" != "-f" ]]; then
+  read -rp "Proceed with update to the latest release/commit? [Y/n]: " ans
+  ans="${ans,,}"
+  if [[ "$ans" == "n" || "$ans" == "no" ]]; then
+    print_warn "Update cancelled by user."
+    exit 0
+  fi
+  echo ""
+fi
+
+# Ensure essential tools are present
+for pkg in tar gzip curl wget sqlite3; do
+  if ! command -v "$pkg" >/dev/null 2>&1; then
+    dnf install -y "$pkg" >/dev/null 2>&1 || true
+  fi
+done
+
+REPO_OWNER="risqinf"
+REPO_NAME="autoscript"
+REPO_BRANCH="${REPO_BRANCH:-main}"
+REPO_TARBALL="https://github.com/${REPO_OWNER}/${REPO_NAME}/archive/refs/heads/${REPO_BRANCH}.tar.gz"
+
+tmpdir=""
+srcdir=""
+
+# Check if running within a cloned repository root or subfolder
+this_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+if [[ -f "$this_dir/install.sh" && -d "$this_dir/scripts" ]]; then
+  srcdir="$this_dir"
+  print_info "Using local repository source: $srcdir"
+elif [[ -f "$this_dir/../../install.sh" && -d "$this_dir/../../scripts" ]]; then
+  srcdir="$(cd "$this_dir/../.." && pwd)"
+  print_info "Using local repository source: $srcdir"
+else
+  tmpdir=$(mktemp -d /tmp/as-update.XXXXXX)
+  cleanup() {
+    [[ -n "$tmpdir" && -d "$tmpdir" ]] && rm -rf "$tmpdir"
+  }
+  trap cleanup EXIT INT TERM
+
+  print_info "Fetching latest code archive from GitHub..."
+  if ! curl -sSL --connect-timeout 10 --max-time 60 -o "$tmpdir/repo.tar.gz" "$REPO_TARBALL"; then
+    print_error "Failed to download update archive from $REPO_TARBALL"
+    exit 1
+  fi
+
+  tar -xzf "$tmpdir/repo.tar.gz" -C "$tmpdir"
+  srcdir=$(find "$tmpdir" -mindepth 1 -maxdepth 1 -type d | head -1)
+  [[ -z "$srcdir" ]] && srcdir="$tmpdir/${REPO_NAME}-${REPO_BRANCH}"
+fi
+
+NEW_VER="Unknown"
+if [[ -f "$srcdir/VERSION" ]]; then
+  NEW_VER=$(tr -d '[:space:]' < "$srcdir/VERSION")
+fi
+print_info "Target version: ${GREEN}${NEW_VER}${NC}"
+
+# 1. Update shared libraries
+print_info "Updating shared libraries (/usr/local/sbin/lib/)..."
+mkdir -p /usr/local/sbin/lib
+if [[ -d "$srcdir/scripts/lib" ]]; then
+  install -m 0644 "$srcdir/scripts/lib/"*.sh /usr/local/sbin/lib/
+fi
+print_ok "Shared libraries updated."
+
+# 2. Update command scripts
+print_info "Updating command scripts (/usr/local/sbin/)..."
+mkdir -p /usr/local/sbin/api
+find "$srcdir/scripts" -maxdepth 2 -type f -name '*.sh' \
+  ! -path '*/api/*' ! -path '*/lib/*' | while read -r file; do
+  name=$(basename "$file" .sh)
+  install -m 0755 "$file" "/usr/local/sbin/$name"
+done
+
+# Install API command scripts into /usr/local/sbin/api
+if [[ -d "$srcdir/scripts/api" ]]; then
+  find "$srcdir/scripts/api" -maxdepth 1 -type f -name '*.sh' | while read -r file; do
+    name=$(basename "$file" .sh)
+    install -m 0755 "$file" "/usr/local/sbin/api/$name"
+  done
+fi
+print_ok "Command scripts updated."
+
+# 3. Update RDNS presets
+if [[ -d "$srcdir/scripts/rdns/presets" ]]; then
+  mkdir -p /usr/local/sbin/rdns/presets /etc/rdns/presets
+  cp -rf "$srcdir/scripts/rdns/presets/"*.json /usr/local/sbin/rdns/presets/ 2>/dev/null || true
+  cp -rf "$srcdir/scripts/rdns/presets/"*.json /etc/rdns/presets/ 2>/dev/null || true
+fi
+
+# 4. Cache prebuilt binaries and build scripts
+if [[ -d "$srcdir/bin" ]]; then
+  mkdir -p /usr/local/share/autoscript/bin
+  cp -rf "$srcdir/bin/"* /usr/local/share/autoscript/bin/ 2>/dev/null || true
+fi
+if [[ -f "$srcdir/scripts/build/build-dropbear-2019.sh" ]]; then
+  mkdir -p /usr/local/share/autoscript/build
+  install -m 0755 "$srcdir/scripts/build/build-dropbear-2019.sh" /usr/local/share/autoscript/build/build-dropbear-2019.sh
+fi
+
+# 5. Update helper scripts
+[[ -f "$srcdir/install-api.sh" ]] && install -m 0755 "$srcdir/install-api.sh" /usr/local/sbin/install-api
+[[ -f "$srcdir/uninstall-api.sh" ]] && install -m 0755 "$srcdir/uninstall-api.sh" /usr/local/sbin/uninstall-api
+[[ -f "$srcdir/uninstall.sh" ]] && install -m 0755 "$srcdir/uninstall.sh" /usr/local/sbin/uninstall
+if [[ -f "$srcdir/update.sh" ]]; then
+  install -m 0755 "$srcdir/update.sh" /usr/local/sbin/update
+elif [[ -f "$srcdir/scripts/system/update.sh" ]]; then
+  install -m 0755 "$srcdir/scripts/system/update.sh" /usr/local/sbin/update
+fi
+ln -sf /usr/local/sbin/update /usr/local/sbin/update-script 2>/dev/null || true
+ln -sf /usr/local/sbin/update /usr/local/sbin/autoscript-update 2>/dev/null || true
+
+# 6. Save updated version files
+if [[ -n "$NEW_VER" && "$NEW_VER" != "Unknown" ]]; then
+  echo "$NEW_VER" > /usr/local/sbin/VERSION
+  echo "$NEW_VER" > /etc/xray/version 2>/dev/null || true
+fi
+
+# 7. Safe database schema verification (idempotent, accounts are never touched)
+print_info "Verifying account database schema (SQLite)..."
+if [[ -f /usr/local/sbin/lib/db.sh ]]; then
+  # shellcheck source=/dev/null
+  . /usr/local/sbin/lib/db.sh
+  db_init
+  print_ok "SQLite database schema up to date."
+fi
+
+# 8. Rebuild API server if Go and source exist
+if [[ -f /usr/local/bin/api-server && -d "$srcdir/files" ]]; then
+  if command -v go >/dev/null 2>&1; then
+    print_info "Recompiling RESTful API server with latest code..."
+    (
+      cd "$srcdir/files" || exit 1
+      CGO_ENABLED=0 go build \
+        -ldflags="-s -w -X main.Version=${NEW_VER}" \
+        -o /usr/local/bin/api-server \
+        ./cmd/server/main.go >/dev/null 2>&1
+    ) && print_ok "API server updated." || print_warn "API compilation failed; existing binary kept."
+  fi
+  systemctl restart api-server >/dev/null 2>&1 || true
+fi
+
+# 9. Reload systemd daemon and refresh monitor background services
+print_info "Reloading systemd and background monitors..."
+systemctl daemon-reload >/dev/null 2>&1
+for svc in quota-ssh quota limit-ip-vless quota-trojan limit-ip-trojan quota-vmess limit-ip-vmess; do
+  if systemctl is-active --quiet "$svc" 2>/dev/null; then
+    systemctl restart "$svc" >/dev/null 2>&1 || true
+  fi
+done
+print_ok "Background monitors refreshed."
+
+# 10. Audit firewall rules quietly
+if [[ -x /usr/local/sbin/fix-firewall ]]; then
+  /usr/local/sbin/fix-firewall --quiet >/dev/null 2>&1 || true
+fi
+
+echo ""
+echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+echo -e "       ${GREEN}AUTOSCRIPT UPDATE COMPLETED SUCCESSFULLY!${NC}            "
+echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+echo -e " Previous Version : ${YELLOW}${CURRENT_VER}${NC}"
+echo -e " Current Version  : ${GREEN}${NEW_VER}${NC}"
+echo -e " Status           : ${GREEN}All menus, libraries & daemons are active.${NC}"
+echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+echo ""

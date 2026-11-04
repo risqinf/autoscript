@@ -535,7 +535,7 @@ classify_domain_app() {
     *instagram.com*|*cdninstagram.com*) echo "Instagram" ;;
     *whatsapp.net*|*whatsapp.com*) echo "WhatsApp" ;;
     *facebook.com*|*fbcdn.net*|*fbsbx.com*|*messenger.com*) echo "Facebook" ;;
-    *telegram.org*|*t.me*|* telesco.pe*|149.154.*|91.108.*) echo "Telegram" ;;
+    *telegram.org*|*t.me*|*telesco.pe*|149.154.*|91.108.*) echo "Telegram" ;;
     *netflix.com*|*nflxvideo.net*|*nflximg.net*|*nflxso.net*) echo "Netflix" ;;
     *disneyplus.com*|*bamgrid.com*|*dssott.com*) echo "Disney+" ;;
     *vidio.com*) echo "Vidio" ;;

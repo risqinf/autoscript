@@ -117,11 +117,17 @@ dnf install -y wget curl openssl && curl -fsSL --proto '=https' --tlsv1.2 -o ins
 curl -fsSL --proto '=https' --tlsv1.2 https://raw.githubusercontent.com/risqinf/autoscript/main/install-api.sh | bash
 ```
 
+### 1-Line Update / Upgrade Command
+```bash
+curl -fsSL --proto '=https' --tlsv1.2 https://raw.githubusercontent.com/risqinf/autoscript/main/update.sh | bash
+```
+
 ---
 
 ## Management Menu & CLI Utilities
 
 - `menu` — Open the interactive SkyNode-styled Enterprise Control Panel
+- `update` — Fast 1-click update for menus, shared libraries, presets, and background services
 - `menu-api` — View or rotate API Bearer Token (`/etc/api/key`) & SHA-256 HMAC Secret (`/etc/api/secret`)
 - `fix-firewall` — Auto-heal Firewalld ports, SELinux booleans/ports (`http_port_t`), and Nginx HTTP/2 `/api/` blocks
 - `optimize-rocky` — Apply extreme Rocky Linux 9 kernel, ZRAM, conntrack, and daemon memory optimizations

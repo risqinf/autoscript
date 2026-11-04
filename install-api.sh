@@ -343,7 +343,7 @@ WantedBy=multi-user.target
 EOF
 
 chmod 644 "$SERVICE_FILE"
-systemctl daemon-reload
+systemctl daemon-reload >/dev/null 2>&1
 print_ok "Systemd service configured: $SERVICE_FILE"
 
 # Ensure Token & HMAC Secret Exist
@@ -378,7 +378,7 @@ fi
 
 # Enable and start service
 print_info "Starting API server service..."
-systemctl enable api-server --now
+systemctl enable api-server --now >/dev/null 2>&1
 sleep 1
 
 # Verify service

@@ -24,7 +24,8 @@ menu_system() {
     ui_opt 12 "Bandwidth Monitor (vnstat)"
     ui_opt 13 "Fix Firewall & Nginx SELinux Ports"
     ui_opt 14 "Extreme Rocky Linux 9 Optimizer (1CPU/1GB+)"
-    ui_opt 15 "Uninstall Script"
+    ui_opt 15 "Update Autoscript (Menu & Core Scripts)"
+    ui_opt 16 "Uninstall Script"
     ui_rule
     ui_opt 0 "Back to Main Menu"
     ui_foot
@@ -60,7 +61,8 @@ menu_system() {
         12) clear ; bw-monitor ; ui_back ; menu_system ;;
         13) clear ; fix-firewall ; ui_back ; menu_system ;;
         14) clear ; optimize-rocky ; ui_back ; menu_system ;;
-        15) clear ; uninstall ;;
+        15) clear ; update ; ui_back ; menu_system ;;
+        16) clear ; uninstall ;;
         0|x|X) clear ; menu ;;
         *) err "Invalid option."; sleep 1; menu_system ;;
     esac

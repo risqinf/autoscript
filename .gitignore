@@ -43,3 +43,6 @@ desktop.ini
 _*.sh
 _*.ps1
 _*.txt
+main.py
+__pycache__/
+*.pyc
