@@ -223,21 +223,25 @@ EOF
           echo ""
           ui_rule
           ui_label "PILIH KATEGORI PRESET"
-          ui_opt 1 "Streaming (Netflix, Disney+, Viu, Vidio, Prime, Crunchyroll, etc)"
-          ui_opt 2 "Malaysia (TLD .my, Maybank, CIMB, TNG, Boost, Astro, Unifi)"
-          ui_opt 3 "Indonesia (TLD .id, BCA, Mandiri, BRI, BNI, Dana, GoPay, Pajak)"
-          ui_opt 4 "Bypass IP Check (ipinfo, speedtest, fast.com, ifconfig, etc)"
+          ui_opt 1 "Streaming & OTT Populer (Netflix, Disney+ Hotstar, Viu, Vidio, Prime, HBO, Astro, Sooka)"
+          ui_opt 2 "Malaysia Region (Semua Web .my, Maybank, CIMB, TNG, Boost, Astro, Sooka, Unifi)"
+          ui_opt 3 "Indonesia Region (Semua Web .id, BCA, Mandiri, BRI, BNI, Dana, GoPay, Pajak)"
+          ui_opt 4 "Bypass IP Check (ipinfo, speedtest, fast.com, ifconfig)"
           ui_opt 5 "Google & YouTube (YouTube, Gmail, Play Store, Google Services)"
+          ui_opt 6 "AI Services (OpenAI ChatGPT, Claude, Gemini, Copilot, Perplexity)"
+          ui_opt 7 "Social Media & Gaming (TikTok, Reddit, Discord, Steam)"
           ui_rule
           ui_opt 0 "Batal"
           ui_foot
-          read -rp " Pilihan Preset [1-5]: " p_choice
+          read -rp " Pilihan Preset [1-7]: " p_choice
           case "$p_choice" in
             1) bash "$RDNS_MGR" load-preset "$target_prof" "streaming" ;;
             2) bash "$RDNS_MGR" load-preset "$target_prof" "malaysia" ;;
             3) bash "$RDNS_MGR" load-preset "$target_prof" "indonesia" ;;
             4) bash "$RDNS_MGR" load-preset "$target_prof" "ipcheck" ;;
             5) bash "$RDNS_MGR" load-preset "$target_prof" "google" ;;
+            6) bash "$RDNS_MGR" load-preset "$target_prof" "ai-services" ;;
+            7) bash "$RDNS_MGR" load-preset "$target_prof" "social-media" ;;
             0) info "Batal." ;;
             *) err "Pilihan tidak valid." ;;
           esac
@@ -263,21 +267,25 @@ EOF
           echo ""
           ui_rule
           ui_label "PILIH PRESET YANG INGIN DIHAPUS"
-          ui_opt 1 "Streaming"
-          ui_opt 2 "Malaysia"
-          ui_opt 3 "Indonesia"
+          ui_opt 1 "Streaming & OTT Populer"
+          ui_opt 2 "Malaysia Region"
+          ui_opt 3 "Indonesia Region"
           ui_opt 4 "Bypass IP Check"
           ui_opt 5 "Google & YouTube"
+          ui_opt 6 "AI Services"
+          ui_opt 7 "Social Media & Gaming"
           ui_rule
           ui_opt 0 "Batal"
           ui_foot
-          read -rp " Pilihan [1-5]: " p_choice
+          read -rp " Pilihan [1-7]: " p_choice
           case "$p_choice" in
             1) bash "$RDNS_MGR" remove-preset "$target_prof" "streaming" ;;
             2) bash "$RDNS_MGR" remove-preset "$target_prof" "malaysia" ;;
             3) bash "$RDNS_MGR" remove-preset "$target_prof" "indonesia" ;;
             4) bash "$RDNS_MGR" remove-preset "$target_prof" "ipcheck" ;;
             5) bash "$RDNS_MGR" remove-preset "$target_prof" "google" ;;
+            6) bash "$RDNS_MGR" remove-preset "$target_prof" "ai-services" ;;
+            7) bash "$RDNS_MGR" remove-preset "$target_prof" "social-media" ;;
             0) info "Batal." ;;
             *) err "Pilihan tidak valid." ;;
           esac

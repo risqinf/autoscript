@@ -36,7 +36,7 @@ else
   err()  { echo -e " ${RED}[ERROR]${NC} $1"; }
 fi
 
-RDNS_DIR="/etc/rdns"
+RDNS_DIR="${RDNS_DIR:-/etc/rdns}"
 CERTS_DIR="${RDNS_DIR}/certs"
 CONFIG_FILE="${RDNS_DIR}/client.yaml"
 RULES_FILE="${RDNS_DIR}/rules.json"
@@ -65,6 +65,35 @@ json_tool() {
   fi
 }
 
+# Cross-platform service helpers (systemd & Alpine OpenRC)
+is_rdns_active() {
+  if command -v systemctl &>/dev/null; then
+    systemctl is-active rdns-client &>/dev/null
+  elif command -v rc-service &>/dev/null; then
+    rc-service rdns-client status &>/dev/null
+  else
+    pgrep -x rdns-client &>/dev/null
+  fi
+}
+
+reload_rdns() {
+  if command -v systemctl &>/dev/null && systemctl is-active rdns-client &>/dev/null; then
+    systemctl reload rdns-client 2>/dev/null || (sleep 1 && systemctl restart rdns-client) >/dev/null 2>&1 &
+  elif command -v rc-service &>/dev/null && rc-service rdns-client status &>/dev/null; then
+    rc-service rdns-client reload 2>/dev/null || (sleep 1 && rc-service rdns-client restart) >/dev/null 2>&1 &
+  else
+    pkill -HUP -x rdns-client 2>/dev/null || true
+  fi
+}
+
+restart_rdns_async() {
+  if command -v systemctl &>/dev/null; then
+    (sleep 1 && systemctl restart rdns-client) >/dev/null 2>&1 &
+  elif command -v rc-service &>/dev/null; then
+    (sleep 1 && rc-service rdns-client restart) >/dev/null 2>&1 &
+  fi
+}
+
 ensure_base_config() {
   local profile_name="$1"
   if [[ ! -f "$CONFIG_FILE" ]]; then
@@ -76,6 +105,8 @@ listen:
   quic: "0.0.0.0:14400"
 
 rules: "${RULES_FILE}"
+
+cdn_direct: true
 
 tls:
   ca_file:   "${CERTS_DIR}/${profile_name}-ca.crt"
@@ -229,13 +260,13 @@ with open(rules_path, 'w') as f:
 EOF
 
   ok "Profile '${profile_name}' paired successfully!"
-  info "Restarting or reloading rdns-client service..."
-  if systemctl is-active rdns-client &>/dev/null; then
-    systemctl reload rdns-client 2>/dev/null || systemctl restart rdns-client 2>/dev/null || true
+  info "Restarting or reloading rdns-client service (safe asynchronous execution)..."
+  if is_rdns_active; then
+    reload_rdns
     ok "rdns-client reloaded."
   else
-    systemctl restart rdns-client 2>/dev/null || true
-    ok "rdns-client started."
+    restart_rdns_async
+    ok "rdns-client started in background."
   fi
   ui_rule
   ui_kv "Profile Name" "$profile_name" "$GREEN"
@@ -285,8 +316,8 @@ with open(rules_path, 'w') as f:
 print(f"Added {len(new_domains)} domain(s) to profile '{target_prof}'.")
 EOF
 
-  if systemctl is-active rdns-client &>/dev/null; then
-    systemctl reload rdns-client 2>/dev/null || true
+  if is_rdns_active; then
+    reload_rdns
     ok "Rules reloaded on running rdns-client."
   fi
 }
@@ -325,8 +356,8 @@ with open(rules_path, 'w') as f:
 print(f"Removed domain(s) from profile '{target_prof}'.")
 EOF
 
-  if systemctl is-active rdns-client &>/dev/null; then
-    systemctl reload rdns-client 2>/dev/null || true
+  if is_rdns_active; then
+    reload_rdns
     ok "Rules reloaded."
   fi
 }
@@ -347,6 +378,7 @@ import json
 
 rules_path = "${RULES_FILE}"
 preset_path = "${preset_file}"
+preset_name = "${preset}"
 target_prof = "${profile}"
 
 with open(preset_path, 'r') as f:
@@ -373,11 +405,11 @@ for d in preset_domains:
 with open(rules_path, 'w') as f:
     json.dump(rules, f, indent=2)
 
-print(f"Preset '{preset}' ({len(preset_domains)} domains) applied to profile '{target_prof}'.")
+print(f"Preset '{preset_name}' ({len(preset_domains)} domains) applied to profile '{target_prof}'.")
 EOF
 
-  if systemctl is-active rdns-client &>/dev/null; then
-    systemctl reload rdns-client 2>/dev/null || true
+  if is_rdns_active; then
+    reload_rdns
     ok "Rules reloaded on running rdns-client."
   fi
 }
@@ -398,6 +430,7 @@ import json
 
 rules_path = "${RULES_FILE}"
 preset_path = "${preset_file}"
+preset_name = "${preset}"
 target_prof = "${profile}"
 
 with open(preset_path, 'r') as f:
@@ -418,11 +451,11 @@ if target_prof in rules:
 with open(rules_path, 'w') as f:
     json.dump(rules, f, indent=2)
 
-print(f"Preset '{preset}' removed from profile '{target_prof}'.")
+print(f"Preset '{preset_name}' removed from profile '{target_prof}'.")
 EOF
 
-  if systemctl is-active rdns-client &>/dev/null; then
-    systemctl reload rdns-client 2>/dev/null || true
+  if is_rdns_active; then
+    reload_rdns
     ok "Rules reloaded."
   fi
 }
@@ -528,8 +561,8 @@ print(f"Profile '${profile}' removed.")
 EOF
 
   rm -f "${CERTS_DIR}/${profile}.crt" "${CERTS_DIR}/${profile}.key" "${CERTS_DIR}/${profile}-ca.crt"
-  if systemctl is-active rdns-client &>/dev/null; then
-    systemctl reload rdns-client 2>/dev/null || true
+  if is_rdns_active; then
+    restart_rdns_async
   fi
 }
 
