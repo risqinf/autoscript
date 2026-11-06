@@ -1,6 +1,6 @@
 # Autoscript VPN — Enterprise RESTful API Reference Manual
 
-> **Version:** 5.6.0 (Enterprise Production Release — EL9 & EL10)  
+> **Version:** 5.6.1 (Enterprise Production Release — EL9 & EL10)  
 > **Server Engine:** Go FastHTTP Daemon (`api-server`) + Separated SQLite WAL Reader/Writer Pools (Zero CGO)  
 > **Security Standard:** 5-Layer Strict SHA-256 + Canonical HMAC-SHA256 + Mutual Response Signatures  
 > **Repository:** [https://github.com/risqinf/autoscript](https://github.com/risqinf/autoscript)
@@ -291,7 +291,7 @@ Returns daemon health, API version, current Unix `server_time` (for client clock
     "security_mode": "strict",
     "server_time": 1762100000,
     "status": "ok",
-    "version": "5.6.0"
+    "version": "5.6.1"
   }
 }
 ```
@@ -305,7 +305,7 @@ Verifies all 5 cryptographic SHA-256 layers and returns a detailed verification 
   "message": "Multi-layer SHA-256 verification succeeded",
   "data": {
     "authenticated": true,
-    "version": "5.6.0",
+    "version": "5.6.1",
     "server_time": 1762100005,
     "verification": {
       "token_name": "default",

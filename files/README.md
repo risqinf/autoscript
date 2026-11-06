@@ -1,4 +1,4 @@
-# Autoscript VPN Enterprise API Server (`v5.6.0`)
+# Autoscript VPN Enterprise API Server (`v5.6.1`)
 
 Zero-downtime, high-concurrency, security-hardened Go RESTful API daemon for Autoscript VPN on **Enterprise Linux 9 & 10** (**Rocky Linux 9–10**, **RHEL 9–10**, **AlmaLinux 9–10**, **Oracle Linux 9–10**).
 
@@ -37,7 +37,7 @@ files/
 cd files
 go vet ./...
 go test -v ./...
-CGO_ENABLED=0 go build -trimpath -ldflags="-s -w -X main.Version=v5.6.0" -o api-server ./cmd/server/main.go
+CGO_ENABLED=0 go build -trimpath -ldflags="-s -w -X main.Version=v5.6.1" -o api-server ./cmd/server/main.go
 ```
 
 For full endpoint schemas and multi-language SHA-256 signing examples, see [`../docs/API.md`](../docs/API.md).

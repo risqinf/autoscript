@@ -3,6 +3,24 @@
 All notable changes to this project are documented here.
 This project adheres to [Semantic Versioning](https://semver.org/).
 
+## [5.6.1] - 2026-11-06
+
+SmartDNS / RDNS Split Routing Native Integration, Media CDN Direct Bypass (>99% Bandwidth Savings), Safe Non-Destructive Update Engine, and Multi-Distro (EL9/EL10 & Alpine) Support: **Release 5.6.1**.
+
+### Added
+- **Native SmartDNS / RDNS Split Routing (`scripts/menu/menu-rdns.sh`, `scripts/rdns/rdns-manager.sh`, `scripts/rdns/presets/`)**:
+  - Full native menu and CLI manager for domain-based split routing over mTLS Yamux stealth tunnels to exit nodes.
+  - Multi-profile support with modular presets: `streaming` (popular OTT), `malaysia` (all `.my` TLDs, Astro, Sooka, banking), `indonesia` (all `.id` TLDs, BCA, Mandiri, BRI, pajak), `ipcheck`, `google`, `ai-services`, and `social-media`.
+  - Longest-suffix rule evaluation engine with automated collision avoidance and domain simulation test (`rdns-manager test-domain`).
+- **Media CDN Direct Bypass (`cdn_direct: true`)**:
+  - Transparent direct connection for heavy streaming video delivery CDNs (`nflxvideo.net`, `aiv-cdn.net`, `googlevideo.com`, `hotstar-cdn.net`, `byteoversea.com`, etc.), reducing exit node bandwidth consumption by >99% while preserving geo-unblocking and catalog access.
+- **Safe Non-Destructive Update Engine (`update.sh`, `scripts/system/update.sh`)**:
+  - Upgrades all system scripts, shared libraries, API helpers, preset templates, and binaries while strictly guaranteeing existing user JSON configurations (`/etc/xray/config.json`, `/etc/rdns/rules.json`, `/etc/rdns/client.yaml`) and databases (`*.sqlite`) are never overwritten or altered.
+- **Fail-Safe Lifecycle & Multi-OS Compatibility**:
+  - Fixed nftables blackhole on service restart by binding listener ports prior to applying netfilter redirects.
+  - Safe decoupled asynchronous service restart preventing HTTP/API request connection drops.
+  - Added native OpenRC init script support alongside systemd units for Alpine Linux compatibility.
+
 ## [5.6.0] - 2026-11-02
 
 Prebuilt Hardened Static Binaries (`Dropbear 2019.78`, `dnstt-server`, `autoscript-api`), Multi-Distro Enterprise Linux 9 & 10 Support, Zero-Downtime 100+ Simultaneous Order Burst Engine, Complete Auto-Detect User Login Endpoints, and Deep Security Hardening release: **Release 5.6.0**.
@@ -412,6 +430,7 @@ First public beta. Developed for **Rocky Linux 9**.
 - Legacy `.txt` account files and `config.json` comment markers.
 - Ads Block (helium) menu entry.
 
+[5.6.1]: https://github.com/risqinf/autoscript/releases/tag/v5.6.1
 [5.6.0]: https://github.com/risqinf/autoscript/releases/tag/v5.6.0
 [5.5.0]: https://github.com/risqinf/autoscript/releases/tag/v5.5.0
 [5.4.0]: https://github.com/risqinf/autoscript/releases/tag/v5.4.0

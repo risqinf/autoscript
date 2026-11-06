@@ -12,7 +12,7 @@ import (
 	"strings"
 )
 
-// Config holds application configuration for Autoscript Enterprise API v5.6.0.
+// Config holds application configuration for Autoscript Enterprise API v5.6.1.
 type Config struct {
 	// Server
 	ListenAddress  string

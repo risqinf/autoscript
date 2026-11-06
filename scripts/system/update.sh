@@ -136,12 +136,67 @@ if [[ -d "$srcdir/scripts/api" ]]; then
 fi
 print_ok "Command scripts updated."
 
-# 3. Update RDNS presets
+# 3. Update RDNS presets & service (preserves existing rules.json & client.yaml)
+print_info "Updating SmartDNS / RDNS presets..."
 if [[ -d "$srcdir/scripts/rdns/presets" ]]; then
   mkdir -p /usr/local/sbin/rdns/presets /etc/rdns/presets
   cp -rf "$srcdir/scripts/rdns/presets/"*.json /usr/local/sbin/rdns/presets/ 2>/dev/null || true
   cp -rf "$srcdir/scripts/rdns/presets/"*.json /etc/rdns/presets/ 2>/dev/null || true
 fi
+
+# Ensure rdns-client systemd service template exists with failsafe cleanup
+if command -v systemctl &>/dev/null; then
+  if [[ ! -f /etc/systemd/system/rdns-client.service ]] || ! grep -q "ExecStopPost" /etc/systemd/system/rdns-client.service 2>/dev/null; then
+    cat > /etc/systemd/system/rdns-client.service <<'EOF_RDNS_SVC'
+[Unit]
+Description=rdns-client (decision node: split DNS + SNI traffic router)
+Documentation=https://github.com/risqinf/rdns
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=root
+ExecStart=/usr/local/bin/rdns-client -config /etc/rdns/client.yaml
+ExecReload=/bin/kill -HUP $MAINPID
+SyslogIdentifier=rdns-client
+AmbientCapabilities=NET_ADMIN
+CapabilityBoundingSet=NET_ADMIN
+NoNewPrivileges=true
+ProtectSystem=strict
+ReadWritePaths=/var/log/rdns-client.log
+ProtectHome=true
+PrivateTmp=true
+LimitNOFILE=65536
+Restart=always
+RestartSec=5
+TimeoutStopSec=15
+ExecStopPost=-/usr/sbin/nft delete table ip rdns
+ExecStopPost=-/usr/sbin/nft delete table ip6 rdns
+
+[Install]
+WantedBy=multi-user.target
+EOF_RDNS_SVC
+    systemctl daemon-reload >/dev/null 2>&1 || true
+  fi
+fi
+
+# Ensure rdns-client binary exists
+if [[ ! -x /usr/local/bin/rdns-client ]]; then
+  UNAME_ARCH="$(uname -m)"
+  case "$UNAME_ARCH" in
+    x86_64|amd64) R_ARCH="amd64" ;;
+    aarch64|arm64) R_ARCH="arm64" ;;
+    *) R_ARCH="" ;;
+  esac
+  if [[ -n "$R_ARCH" ]]; then
+    print_info "Installing static rdns-client binary (v0.2.0)..."
+    curl -sSL --connect-timeout 10 --max-time 30 -o /usr/local/bin/rdns-client \
+      "https://github.com/risqinf/rdns/releases/download/v0.2.0/rdns-client-linux-${R_ARCH}" 2>/dev/null || true
+    chmod 755 /usr/local/bin/rdns-client 2>/dev/null || true
+  fi
+fi
+print_ok "RDNS components updated."
 
 # 4. Cache prebuilt binaries and build scripts
 if [[ -d "$srcdir/bin" ]]; then

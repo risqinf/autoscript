@@ -1,15 +1,17 @@
 # Autoscript VPN
 
-> Version: **5.6.0** (Enterprise Release — EL9 & EL10) — see [CHANGELOG.md](CHANGELOG.md).
+> Version: **5.6.1** (Enterprise Release — EL9 & EL10) — see [CHANGELOG.md](CHANGELOG.md).
 
 AutoScript VPN & Tunneling Management System, engineered and extremized for **Enterprise Linux 9 & 10** (**Rocky Linux 9–10**, **RHEL 9–10**, **AlmaLinux 9–10**, **Oracle Linux 9–10**).
 
-Enterprise-grade multi-protocol tunneling platform supporting **SSH All-Protocol** (OpenSSH, Prebuilt Hardened Dropbear 2019.78, Direct SSH SSL/TLS, SSH-WS, Prebuilt SlowDNS DNSTT, OpenVPN), **NoobzVPN**, **VLESS**, **VMESS**, and **Trojan** with full WebSocket (`ws`), HTTPUpgrade (`hu`), XHTTP (`xhttp`), and gRPC transport matrix, fronted by HAProxy + Nginx HTTP/1.1 & HTTP/2, extreme 1 vCPU / 1 GB RAM kernel/ZRAM optimization, and a zero-downtime high-concurrency **Go RESTful API daemon** protected by **5-Layer Strict SHA-256 + Canonical HMAC-SHA256 verification**.
+Enterprise-grade multi-protocol tunneling platform supporting **SSH All-Protocol** (OpenSSH, Prebuilt Hardened Dropbear 2019.78, Direct SSH SSL/TLS, SSH-WS, Prebuilt SlowDNS DNSTT, OpenVPN), **NoobzVPN**, **VLESS**, **VMESS**, and **Trojan** with full WebSocket (`ws`), HTTPUpgrade (`hu`), XHTTP (`xhttp`), and gRPC transport matrix, **SmartDNS / RDNS Split Routing** with media CDN direct bypass (>99% bandwidth savings), fronted by HAProxy + Nginx HTTP/1.1 & HTTP/2, extreme 1 vCPU / 1 GB RAM kernel/ZRAM optimization, and a zero-downtime high-concurrency **Go RESTful API daemon** protected by **5-Layer Strict SHA-256 + Canonical HMAC-SHA256 verification**.
 
 ---
 
-## Key Features (v5.6.0)
+## Key Features (v5.6.1)
 
+- **SmartDNS / RDNS Split Routing & Transparent Traffic Engine**: Integrated transparent decision node routing (`menu-rdns` & `rdns-manager`) that routes chosen country domains (such as `.my` TLDs, Malaysian/Indonesian banking, and streaming OTT) through mTLS Yamux stealth tunnels to exit nodes while automatically streaming heavy video chunks direct (`cdn_direct: true`), preserving >99% bandwidth.
+- **Safe Non-Destructive Update Engine**: Updates menus, libraries, helpers, systemd templates, and presets without ever modifying or overwriting existing user databases (`*.sqlite`) or custom JSON configurations (`config.json`, `rules.json`).
 - **Prebuilt Hardened Binaries (Zero VPS Compile Time)**: Ships cryptographically SHA-256-verified static binaries for **`Dropbear 2019.78`** (`dropbear` + `dropbearkey` linked with static `libxcrypt` supporting both EL9 `$6$` SHA-512 and EL10 `$y$` YESCRYPT, compile-time SSRF/IMDS/loopback isolation, and real-time `/etc/shadow` `sp_expire` enforcement), **`dnstt-server`** (SlowDNS), and **`autoscript-api`** (`linux-amd64` & `linux-arm64`) — installs in ~1–2 seconds without installing GCC or Go on the VPS.
 - **Multi-Distro Enterprise Linux 9 & 10 Support**: Native support across **Rocky Linux 9–10**, **RHEL 9–10**, **AlmaLinux 9–10**, and **Oracle Linux 9–10** (`x86_64` & `aarch64`), automatically configuring CRB / CodeReady Builder + EPEL 9/10 across DNF4 and DNF5.
 - **Zero-Downtime Simultaneous Order Burst Engine**: Handles **100+ simultaneous buyer orders** at the exact same millisecond with zero `SQLITE_BUSY`, zero `/etc/passwd` lock failures, and zero Xray restart storms via **Leader-Follower Group-Commit Xray Write Coalescing**, **Cross-Process `flock` Batch `/etc/shadow` Mutation**, **DB-First Atomic Reservation**, and **SQLite WAL `busy_timeout(15000)`**.

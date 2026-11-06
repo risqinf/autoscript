@@ -3,7 +3,7 @@
 # Project: Autoscript VPN by risqinf
 # Description: Enterprise RESTful API Server Installer & Builder
 # Supported OS: Rocky Linux 9-10, RHEL 9-10, AlmaLinux 9-10, Oracle Linux 9-10
-# Version: 5.6.0
+# Version: 5.6.1
 # License: Apache License 2.0 (see LICENSE file)
 # Repository: https://github.com/risqinf/autoscript
 # ========================================================
@@ -306,7 +306,7 @@ fi
 print_info "Installing systemd service..."
 cat >"$SERVICE_FILE" <<'EOF'
 [Unit]
-Description=Autoscript VPN Enterprise API Server (v5.6.0)
+Description=Autoscript VPN Enterprise API Server (v5.6.1)
 Documentation=https://github.com/risqinf/autoscript
 After=network.target xray.service dropbear.service
 Wants=network-online.target
@@ -397,7 +397,7 @@ echo ""
 echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
 echo -e "${GREEN}${BOLD}           API SERVER INSTALLATION SUCCESSFUL!              ${NC}"
 echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
-echo -e " ${WHITE}Version${NC}         : ${CYAN}${LATEST_TAG:-v5.6.0}${NC}"
+echo -e " ${WHITE}Version${NC}         : ${CYAN}${LATEST_TAG:-v5.6.1}${NC}"
 echo -e " ${WHITE}Security Mode${NC}   : ${GREEN}STRICT (5-Layer SHA-256 + HMAC-SHA256)${NC}"
 echo -e " ${WHITE}Endpoint Local${NC}  : ${CYAN}http://127.0.0.1:9000${NC}"
 echo -e " ${WHITE}Endpoint Public${NC} : ${CYAN}https://${DOMAIN}${NC}"

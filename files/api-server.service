@@ -1,5 +1,5 @@
 [Unit]
-Description=Autoscript VPN Enterprise API Server (v5.6.0)
+Description=Autoscript VPN Enterprise API Server (v5.6.1)
 Documentation=https://github.com/risqinf/autoscript
 After=network.target xray.service dropbear.service
 Wants=network-online.target

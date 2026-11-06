@@ -3,7 +3,7 @@
 # Project: Autoscript VPN by risqinf
 # Description: Extreme Enterprise Linux 9 & 10 Kernel, ZRAM, Conntrack & Daemon
 #              Memory Tuning (Rocky 9-10, RHEL 9-10, AlmaLinux 9-10, Oracle Linux 9-10)
-# Version: 5.6.0
+# Version: 5.6.1
 # License: Apache License 2.0 (see LICENSE file)
 # Repository: https://github.com/risqinf/autoscript
 # ========================================================
@@ -221,7 +221,7 @@ EOF
 
   cat >/etc/sysctl.d/99-autoscript-extreme.conf <<EOF
 # ============================================================================
-# Autoscript v5.6.0 Extreme Enterprise Linux 9 & 10 Kernel Tuning (${TIER})
+# Autoscript v5.6.1 Extreme Enterprise Linux 9 & 10 Kernel Tuning (${TIER})
 # ============================================================================
 
 # --- Forwarding & BBR Congestion Control ---
@@ -479,7 +479,7 @@ UEOF
     myip=$(hostname -I 2>/dev/null | awk '{print $1}')
     domain=$(cat /etc/xray/domain 2>/dev/null | tr -d '[:space:]')
     cat >/etc/squid/squid.conf <<EOF
-# Autoscript v5.6.0 Hardened & Low-Memory Squid Configuration
+# Autoscript v5.6.1 Hardened & Low-Memory Squid Configuration
 acl to_vps_ip dst 127.0.0.1/32
 $( [[ -n "$myip" ]] && echo "acl to_vps_ip dst ${myip}/32" )
 $( [[ -n "$domain" && "$domain" != "notset" ]] && echo "acl to_vps_dom dstdomain ${domain}" )

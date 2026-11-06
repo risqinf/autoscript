@@ -3,11 +3,11 @@
 # Project: Autoscript VPN by risqinf
 # Description: AutoScript VPN & Tunneling Management System
 # Supported OS: Rocky Linux 9-10, RHEL 9-10, AlmaLinux 9-10, Oracle Linux 9-10
-# Version: 5.6.0
+# Version: 5.6.1
 # License: Apache License 2.0 (see LICENSE file)
 # Repository: https://github.com/risqinf/autoscript
 # ========================================================
-AS_VERSION="5.6.0"
+AS_VERSION="5.6.1"
 # --- Color Definitions ---
 NC='\033[0m'
 RED='\033[0;31m'
@@ -271,7 +271,7 @@ mkdir -p /etc/ssh/sshd_config.d
 # On EL9/EL10, /etc/ssh/sshd_config.d/*.conf is evaluated in lexical order and
 # first-match wins over cloud-init's 50-cloud-init.conf (PasswordAuthentication no).
 cat >/etc/ssh/sshd_config.d/00-autoscript.conf <<'EOF'
-# Autoscript v5.6.0 Hardened OpenSSH Configuration (EL9 & EL10)
+# Autoscript v5.6.1 Hardened OpenSSH Configuration (EL9 & EL10)
 Port 22
 Port 3303
 PermitRootLogin yes

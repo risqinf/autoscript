@@ -4,7 +4,7 @@
 # Description: Complete Firewalld, SELinux (Nginx/HAProxy/SSH Permission Fix)
 #              & Localhost Control-Port Isolation for EL9 & EL10
 #              (Rocky 9-10, RHEL 9-10, AlmaLinux 9-10, Oracle Linux 9-10)
-# Version: 5.6.0
+# Version: 5.6.1
 # License: Apache License 2.0 (see LICENSE file)
 # Repository: https://github.com/risqinf/autoscript
 # ========================================================

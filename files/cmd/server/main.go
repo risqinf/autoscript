@@ -23,8 +23,8 @@ import (
 	_ "modernc.org/sqlite"
 )
 
-// Version is injected at build time via -ldflags "-X main.Version=v5.6.0".
-var Version = "v5.6.0"
+// Version is injected at build time via -ldflags "-X main.Version=v5.6.1".
+var Version = "v5.6.1"
 
 func main() {
 	showVersion := flag.Bool("version", false, "Print version and exit")

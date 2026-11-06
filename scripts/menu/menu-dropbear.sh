@@ -3,7 +3,7 @@
 # Project: Autoscript VPN by risqinf
 # Description: Hardened Dropbear SSH Manager (Prebuilt 2019.78 + Multi-Version)
 # Supported OS: Rocky Linux 9-10, RHEL 9-10, AlmaLinux 9-10, Oracle Linux 9-10
-# Version: 5.6.0
+# Version: 5.6.1
 # License: Apache License 2.0 (see LICENSE file)
 # Repository: https://github.com/risqinf/autoscript
 # ========================================================

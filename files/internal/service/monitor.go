@@ -26,7 +26,7 @@ import (
 	"github.com/rs/zerolog"
 )
 
-const AppVersion = "5.6.0"
+const AppVersion = "5.6.1"
 
 // MonitorService defines the interface for system, bandwidth, quota, and live session telemetry.
 type MonitorService interface {
