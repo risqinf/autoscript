@@ -171,8 +171,14 @@ IPVPS=$(curl -s --max-time 3 ifconfig.me 2>/dev/null || echo "N/A")
 
 
 # --- MAIN MENU ---
+SCRIPT_VER="5.6.1"
+if [[ -f /usr/local/sbin/VERSION ]]; then
+  SCRIPT_VER=$(tr -d '[:space:]' < /usr/local/sbin/VERSION)
+fi
+
 clear
-ui_header "ENTERPRISE VPN MANAGER"
+ui_header "ENTERPRISE VPN MANAGER (v${SCRIPT_VER})"
+ui_kv "Version"  "v${SCRIPT_VER}" "$GREEN"
 ui_kv "OS"       "$OS1"
 ui_kv "IP"       "$IPVPS"
 ui_kv "Domain"   "$DOMAIN"

@@ -42,22 +42,43 @@ elif [[ -f /etc/xray/version ]]; then
   CURRENT_VER=$(tr -d '[:space:]' < /etc/xray/version)
 fi
 
+REPO_OWNER="risqinf"
+REPO_NAME="autoscript"
+REPO_BRANCH="${REPO_BRANCH:-main}"
+REPO_TARBALL="https://github.com/${REPO_OWNER}/${REPO_NAME}/archive/refs/heads/${REPO_BRANCH}.tar.gz"
+LATEST_VER_URL="https://raw.githubusercontent.com/${REPO_OWNER}/${REPO_NAME}/${REPO_BRANCH}/VERSION"
+
+# Fetch latest available version realtime from GitHub
+LATEST_VER=$(curl -sSL --connect-timeout 4 --max-time 6 "$LATEST_VER_URL" 2>/dev/null | tr -d '[:space:]' || echo "")
+if [[ -z "$LATEST_VER" ]]; then
+  LATEST_VER="5.6.1"
+fi
+
+STATUS_BADGE=""
+if [[ "$CURRENT_VER" != "$LATEST_VER" ]]; then
+  STATUS_BADGE="${GREEN}[UPDATE TERSEDIA ➔ v${LATEST_VER}]${NC}"
+else
+  STATUS_BADGE="${CYAN}[SUDAH VERSI TERBARU]${NC}"
+fi
+
 clear
 echo ""
 echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
 echo -e "           ${GREEN}AUTOSCRIPT SYSTEM & SCRIPT UPDATER${NC}               "
 echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
-echo -e " Current Installed Version : ${YELLOW}${CURRENT_VER}${NC}"
-echo -e " Repository                : ${CYAN}https://github.com/risqinf/autoscript${NC}"
+echo -e " Versi Terpasang di VPS    : ${YELLOW}${CURRENT_VER}${NC}"
+echo -e " Versi Terbaru di GitHub   : ${GREEN}${LATEST_VER}${NC} ${STATUS_BADGE}"
+echo -e " Repository                : ${CYAN}https://github.com/${REPO_OWNER}/${REPO_NAME}${NC}"
+echo -e " Mode Keamanan             : ${GREEN}NON-DESTRUCTIVE (DB & JSON User Aman)${NC}"
 echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
 echo ""
 
 # Confirm update unless quiet or forced
 if [[ "${1:-}" != "-y" && "${1:-}" != "--force" && "${1:-}" != "--quiet" && "${1:-}" != "-f" ]]; then
-  read -rp "Proceed with update to the latest release/commit? [Y/n]: " ans
+  read -rp "Lanjutkan proses update ke rilis terbaru (v${LATEST_VER})? [Y/n]: " ans
   ans="${ans,,}"
   if [[ "$ans" == "n" || "$ans" == "no" ]]; then
-    print_warn "Update cancelled by user."
+    print_warn "Update dibatalkan oleh pengguna."
     exit 0
   fi
   echo ""
@@ -69,11 +90,6 @@ for pkg in tar gzip curl wget sqlite3; do
     dnf install -y "$pkg" >/dev/null 2>&1 || true
   fi
 done
-
-REPO_OWNER="risqinf"
-REPO_NAME="autoscript"
-REPO_BRANCH="${REPO_BRANCH:-main}"
-REPO_TARBALL="https://github.com/${REPO_OWNER}/${REPO_NAME}/archive/refs/heads/${REPO_BRANCH}.tar.gz"
 
 tmpdir=""
 srcdir=""
