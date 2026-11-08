@@ -1006,7 +1006,7 @@ case "${1:-}" in
     ;;
   *)
     echo "RDNS Manager CLI (github: @risqinf)"
-    echo "Usage: rdns-manager <pair|add-rule|remove-rule|load-preset|remove-preset|list-rules|test-domain|remove-profile|status|doctor|restart|logs>"
+    echo "Usage: rdns-manager <pair|add-rule|remove-rule|load-preset|remove-preset|list-rules|test-domain|remove-profile|status|doctor|restart|logs|update>"
     exit 1
     ;;
 esac
