@@ -960,8 +960,69 @@ cmd_update() {
   fi
 }
 
+cmd_cdn() {
+  local action="${1:-toggle}"
+  if [[ ! -f "$CONFIG_FILE" ]]; then
+    err "File konfigurasi $CONFIG_FILE tidak ditemukan."
+    return 1
+  fi
+
+  local current_state
+  current_state=$(grep -E '^\s*cdn_direct:' "$CONFIG_FILE" 2>/dev/null | awk '{print $2}' | tr -d ' "' || echo "true")
+  [[ -z "$current_state" ]] && current_state="true"
+
+  local target_state
+  case "$action" in
+    on|enable|1|true)
+      target_state="true"
+      ;;
+    off|disable|0|false)
+      target_state="false"
+      ;;
+    status)
+      if [[ "$current_state" == "true" ]]; then
+        echo -e " ${GREEN}[ON]${NC} CDN Direct Streaming Bypass AKTIF (Hemat Bandwidth >99% & Anti-Buffering)"
+      else
+        echo -e " ${YELLOW}[OFF]${NC} CDN Direct Streaming Bypass NONAKTIF (Semua Video Lewat Tunnel Exit Node)"
+      fi
+      return 0
+      ;;
+    toggle|*)
+      if [[ "$current_state" == "true" ]]; then
+        target_state="false"
+      else
+        target_state="true"
+      fi
+      ;;
+  esac
+
+  python3 - <<EOF
+import yaml
+with open("${CONFIG_FILE}", 'r') as f:
+    cfg = yaml.safe_load(f) or {}
+cfg['cdn_direct'] = (True if "${target_state}" == "true" else False)
+with open("${CONFIG_FILE}", 'w') as f:
+    yaml.dump(cfg, f, default_flow_style=False)
+EOF
+
+  if [[ "$target_state" == "true" ]]; then
+    ok "CDN Direct Bypass diaktifkan (cdn_direct: true) — Video streaming direct ke CDN Singapore!"
+  else
+    warn "CDN Direct Bypass dimatikan (cdn_direct: false) — Semua video streaming dipaksa lewat tunnel Exit Node."
+  fi
+
+  if is_rdns_active; then
+    info "Mereload service rdns-client..."
+    systemctl restart rdns-client
+    ok "Service rdns-client berhasil direstart dengan mode CDN baru."
+  fi
+}
+
 # --- CLI Dispatcher ---
 case "${1:-}" in
+  cdn|toggle-cdn|cdn-direct)
+    shift; cmd_cdn "$@"
+    ;;
   pair)
     shift; cmd_pair "$@"
     ;;
@@ -1003,7 +1064,7 @@ case "${1:-}" in
     ;;
   *)
     echo "RDNS Manager CLI (github: @risqinf)"
-    echo "Usage: rdns-manager <pair|add-rule|remove-rule|load-preset|remove-preset|list-rules|test-domain|remove-profile|status|doctor|restart|logs|update>"
+    echo "Usage: rdns-manager <pair|cdn [on|off|status|toggle]|add-rule|remove-rule|load-preset|remove-preset|list-rules|test-domain|remove-profile|status|doctor|restart|logs|update>"
     exit 1
     ;;
 esac

@@ -95,6 +95,14 @@ menu_rdns() {
   local profiles; profiles=$(get_profile_list)
   local prof_count; prof_count=$(echo "$profiles" | wc -w)
   local rules_count; rules_count=$(get_rules_count)
+  local cdn_st; cdn_st=$(grep -E '^\s*cdn_direct:' /etc/rdns/client.yaml 2>/dev/null | awk '{print $2}' | tr -d ' "' || echo "true")
+  [[ -z "$cdn_st" ]] && cdn_st="true"
+  local cdn_label
+  if [[ "$cdn_st" == "true" ]]; then
+    cdn_label="${GREEN}ON (Bypass Direct - Hemat Kuota >99%)${NC}"
+  else
+    cdn_label="${YELLOW}OFF (Semua Video Lewat Tunnel Exit Node)${NC}"
+  fi
 
   ui_header "RDNS CLIENT (STEALTH TUNNEL)"
   ui_kv "Author / Credit" "${CYAN}github: @risqinf${NC}"
@@ -103,6 +111,7 @@ menu_rdns() {
   ui_status "RDNS Service"  "$svc_st"
   ui_kv "Active Nodes"    "${prof_count} Exit Node(s)"
   ui_kv "Routed Rules"    "${rules_count} Domain(s)"
+  ui_kv "Media CDN Direct" "$cdn_label"
   ui_rule
   ui_label "PAIRING & PROFILES"
   ui_opt 1  "Pair Exit Node Baru (Paste Token rdns://...)"
@@ -120,10 +129,11 @@ menu_rdns() {
   ui_opt 9  "Test Routing Domain (Dry-Run Matcher)"
   ui_rule
   ui_label "MAINTENANCE & MONITORING"
-  ui_opt 10 "Restart / Reload Service rdns-client"
-  ui_opt 11 "Lihat Log Real-Time (rdns-client.log)"
-  ui_opt 12 "Diagnostik & Cek Kesehatan Sistem (Doctor)"
-  ui_opt 13 "Update / Sinkronkan Binary rdns-client (v0.2.1)"
+  ui_opt 10 "Toggle Media CDN Direct Bypass (ON / OFF)"
+  ui_opt 11 "Restart / Reload Service rdns-client"
+  ui_opt 12 "Lihat Log Real-Time (rdns-client.log)"
+  ui_opt 13 "Diagnostik & Cek Kesehatan Sistem (Doctor)"
+  ui_opt 14 "Update / Sinkronkan Binary rdns-client (v0.2.1)"
   ui_rule
   ui_opt 0  "Kembali ke Menu Utama"
   ui_foot
@@ -420,13 +430,24 @@ EOF
 
     10)
       clear
-      bash "$RDNS_MGR" restart || true
+      ui_header "TOGGLE MEDIA CDN DIRECT BYPASS"
+      ui_kv "Credit" "github: @risqinf" "$PINK"
+      ui_rule
+      bash "$RDNS_MGR" cdn toggle || true
       ui_foot
       ui_back
       menu_rdns
       ;;
 
     11)
+      clear
+      bash "$RDNS_MGR" restart || true
+      ui_foot
+      ui_back
+      menu_rdns
+      ;;
+
+    12)
       clear
       ui_header "LOG RUNTIME RDNS CLIENT"
       ui_kv "Credit" "github: @risqinf" "$PINK"
@@ -438,7 +459,7 @@ EOF
       menu_rdns
       ;;
 
-    12)
+    13)
       clear
       bash "$RDNS_MGR" doctor || true
       ui_foot
@@ -446,7 +467,7 @@ EOF
       menu_rdns
       ;;
 
-    13)
+    14)
       clear
       bash "$RDNS_MGR" update || true
       ui_foot
