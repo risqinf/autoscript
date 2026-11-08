@@ -249,6 +249,35 @@ if command -v systemctl &>/dev/null && systemctl is-active rdns-client &>/dev/nu
 fi
 print_ok "RDNS components updated."
 
+# Ensure SELinux context on Xray binary
+if [[ -f /usr/local/bin/xray ]]; then
+  restorecon -F /usr/local/bin/xray 2>/dev/null || chcon -t bin_t /usr/local/bin/xray 2>/dev/null || true
+fi
+
+# Ensure HAProxy runtime directory & systemd drop-in resilience
+if command -v haproxy &>/dev/null; then
+  mkdir -p /run/haproxy /etc/systemd/system/haproxy.service.d
+  chown -R haproxy:haproxy /run/haproxy 2>/dev/null || true
+  cat > /etc/systemd/system/haproxy.service.d/10-ulimit-resilience.conf <<'UEOF'
+[Unit]
+StartLimitIntervalSec=0
+
+[Service]
+RuntimeDirectory=haproxy
+RuntimeDirectoryMode=0755
+LimitNOFILE=1048576
+LimitNPROC=65535
+LimitMEMLOCK=infinity
+LimitFSIZE=infinity
+LimitDATA=infinity
+LimitSTACK=infinity
+LimitAS=infinity
+LimitCORE=0
+TasksMax=infinity
+UEOF
+  systemctl daemon-reload >/dev/null 2>&1 || true
+fi
+
 # 4. Cache prebuilt binaries and build scripts
 if [[ -d "$srcdir/bin" ]]; then
   mkdir -p /usr/local/share/autoscript/bin

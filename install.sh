@@ -1296,6 +1296,7 @@ EOF
     mkdir -p /usr/local/bin /usr/local/share/xray
     unzip -oq "${xray_tmp}/${xray_zip}" -d "$xray_tmp/extracted"
     install -m 0755 "$xray_tmp/extracted/xray" /usr/local/bin/xray
+    restorecon -F /usr/local/bin/xray 2>/dev/null || chcon -t bin_t /usr/local/bin/xray 2>/dev/null || true
     [[ -f "$xray_tmp/extracted/geoip.dat" ]] && install -m 0644 "$xray_tmp/extracted/geoip.dat" /usr/local/share/xray/geoip.dat
     [[ -f "$xray_tmp/extracted/geosite.dat" ]] && install -m 0644 "$xray_tmp/extracted/geosite.dat" /usr/local/share/xray/geosite.dat
     print_success "Xray-core ${xray_ver} SHA-256 verified and installed."

@@ -456,12 +456,18 @@ EOF
     limit-ip-trojan.service \
     limit-ip-vmess.service; do
     mkdir -p "/etc/systemd/system/${svc_unit}.d"
-    cat >"/etc/systemd/system/${svc_unit}.d/10-ulimit-resilience.conf" <<'UEOF'
+    local extra_runtime=""
+    if [[ "$svc_unit" == "haproxy.service" ]]; then
+      extra_runtime="RuntimeDirectory=haproxy
+RuntimeDirectoryMode=0755
+"
+    fi
+    cat >"/etc/systemd/system/${svc_unit}.d/10-ulimit-resilience.conf" <<UEOF
 [Unit]
 StartLimitIntervalSec=0
 
 [Service]
-LimitNOFILE=1048576
+${extra_runtime}LimitNOFILE=1048576
 LimitNPROC=65535
 LimitMEMLOCK=infinity
 LimitFSIZE=infinity
