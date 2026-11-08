@@ -52,7 +52,7 @@ else
 fi
 
 # Ensure directories exist
-mkdir -p "$CERTS_DIR"
+mkdir -p "$CERTS_DIR" 2>/dev/null || true
 
 # Helper for JSON operations via jq or python3
 json_tool() {
@@ -76,21 +76,246 @@ is_rdns_active() {
   fi
 }
 
-reload_rdns() {
-  if command -v systemctl &>/dev/null && systemctl is-active rdns-client &>/dev/null; then
-    systemctl reload rdns-client 2>/dev/null || (sleep 1 && systemctl restart rdns-client) >/dev/null 2>&1 &
-  elif command -v rc-service &>/dev/null && rc-service rdns-client status &>/dev/null; then
-    rc-service rdns-client reload 2>/dev/null || (sleep 1 && rc-service rdns-client restart) >/dev/null 2>&1 &
+ensure_rdns_installed() {
+  # 1. Pastikan direktori kerja dan file log selalu siap
+  mkdir -p "$CERTS_DIR" "$PRESETS_DIR" "${RDNS_DIR}/presets" 2>/dev/null || true
+  mkdir -p /var/log 2>/dev/null || true
+  if [[ ! -f "/var/log/rdns-client.log" ]]; then
+    touch "/var/log/rdns-client.log" 2>/dev/null || true
+    chmod 644 "/var/log/rdns-client.log" 2>/dev/null || true
+  fi
+
+  # 2. Pastikan dependensi PyYAML tersedia jika Python digunakan
+  if command -v python3 &>/dev/null; then
+    if ! python3 -c "import yaml" 2>/dev/null; then
+      info "Memverifikasi modul python3-pyyaml untuk integrasi YAML..."
+      if command -v dnf &>/dev/null; then
+        dnf install -y python3-pyyaml >/dev/null 2>&1 || true
+      elif command -v apt-get &>/dev/null; then
+        apt-get install -y python3-yaml >/dev/null 2>&1 || true
+      elif command -v apk &>/dev/null; then
+        apk add --no-cache py3-yaml >/dev/null 2>&1 || true
+      elif command -v pip3 &>/dev/null; then
+        pip3 install pyyaml >/dev/null 2>&1 || true
+      fi
+    fi
+  fi
+
+  # 3. Pastikan binary rdns-client terpasang di /usr/local/bin
+  if [[ ! -x /usr/local/bin/rdns-client ]]; then
+    info "Binary /usr/local/bin/rdns-client belum ditemukan. Melakukan instalasi..."
+    local arch
+    case "$(uname -m)" in
+      x86_64|amd64) arch="amd64" ;;
+      aarch64|arm64) arch="arm64" ;;
+      *) arch="" ;;
+    esac
+
+    local installed=false
+    local candidate_paths=(
+      "/home/risqinf/Project-Real/rdns/dist/rdns-client-linux-${arch}"
+      "/home/risqinf/Project-Real/rdns/bin/rdns-client-linux"
+      "/usr/local/share/autoscript/bin/rdns-client-linux-${arch}"
+      "/usr/local/share/autoscript/bin/rdns-client"
+    )
+    for c in "${candidate_paths[@]}"; do
+      if [[ -x "$c" ]]; then
+        info "Menginstal rdns-client dari sumber lokal: $c"
+        if [[ -w /usr/local/bin ]] || [[ "${EUID:-$(id -u)}" -eq 0 ]]; then
+          cp -f "$c" /usr/local/bin/rdns-client 2>/dev/null || sudo cp -f "$c" /usr/local/bin/rdns-client 2>/dev/null || true
+          chmod 755 /usr/local/bin/rdns-client 2>/dev/null || sudo chmod 755 /usr/local/bin/rdns-client 2>/dev/null || true
+        fi
+        installed=true
+        break
+      fi
+    done
+
+    if [[ "$installed" != "true" && -n "$arch" ]]; then
+      info "Mengunduh binary resmi rdns-client (v0.2.1)..."
+      if [[ -w /usr/local/bin ]] || [[ "${EUID:-$(id -u)}" -eq 0 ]]; then
+        curl -sSL --connect-timeout 10 --max-time 30 -o /usr/local/bin/rdns-client \
+          "https://github.com/risqinf/rdns/releases/download/v0.2.1/rdns-client-linux-${arch}" 2>/dev/null || true
+        chmod 755 /usr/local/bin/rdns-client 2>/dev/null || sudo chmod 755 /usr/local/bin/rdns-client 2>/dev/null || true
+      fi
+    fi
+
+    if [[ ! -x /usr/local/bin/rdns-client ]]; then
+      warn "Binary /usr/local/bin/rdns-client belum terpasang (memerlukan izin root)."
+    else
+      ok "Binary rdns-client berhasil dipasang di /usr/local/bin/rdns-client"
+    fi
+  fi
+
+  # 4. Pastikan unit systemd rdns-client.service terpasang & aktif
+  if command -v systemctl &>/dev/null; then
+    local svc_file="/etc/systemd/system/rdns-client.service"
+    if [[ ! -f "$svc_file" ]] || ! grep -q "ReadWritePaths" "$svc_file" 2>/dev/null || ! grep -q "ExecStartPre" "$svc_file" 2>/dev/null; then
+      if [[ -w /etc/systemd/system ]] || [[ "${EUID:-$(id -u)}" -eq 0 ]]; then
+        info "Memasang dan memperbarui service systemd: $svc_file..."
+        cat > "$svc_file" <<'EOF_RDNS_UNIT'
+[Unit]
+Description=rdns-client (decision node: split DNS + SNI traffic router)
+Documentation=https://github.com/risqinf/rdns
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=root
+ExecStartPre=-/bin/sh -c 'mkdir -p /var/log /etc/rdns/certs && touch /var/log/rdns-client.log && chmod 644 /var/log/rdns-client.log 2>/dev/null || true'
+ExecStart=/usr/local/bin/rdns-client -config /etc/rdns/client.yaml
+ExecReload=/bin/kill -HUP $MAINPID
+SyslogIdentifier=rdns-client
+AmbientCapabilities=NET_ADMIN
+CapabilityBoundingSet=NET_ADMIN
+NoNewPrivileges=true
+ProtectSystem=strict
+ReadWritePaths=/var/log /var/log/rdns-client.log /etc/rdns
+ProtectHome=true
+PrivateTmp=true
+LimitNOFILE=65536
+Restart=always
+RestartSec=3
+TimeoutStopSec=15
+ExecStopPost=-/usr/sbin/nft delete table ip rdns
+ExecStopPost=-/usr/sbin/nft delete table ip6 rdns
+
+[Install]
+WantedBy=multi-user.target
+EOF_RDNS_UNIT
+        chmod 644 "$svc_file" 2>/dev/null || true
+        systemctl daemon-reload >/dev/null 2>&1 || true
+        systemctl enable rdns-client >/dev/null 2>&1 || true
+        ok "Service rdns-client terkonfigurasi dan diaktifkan di systemd."
+      fi
+    fi
+  fi
+  return 0
+}
+
+print_health_summary() {
+  local pid=""
+  if command -v pgrep &>/dev/null; then
+    pid=$(pgrep -f "rdns-client.*-config" | head -1 || echo "")
+    [[ -z "$pid" ]] && pid=$(pgrep -x rdns-client | head -1 || echo "")
+  fi
+
+  echo ""
+  ui_label "STATUS DETEKSI SISTEM & RUNTIME RDNS"
+
+  if [[ -n "$pid" ]]; then
+    echo -e "   ${GREEN}[✓]${NC} ${WHITE}Service Daemon    :${NC} ${GREEN}ACTIVE${NC} ${WHITE}(PID: ${pid})${NC}"
   else
-    pkill -HUP -x rdns-client 2>/dev/null || true
+    echo -e "   ${GREEN}[✓]${NC} ${WHITE}Service Daemon    :${NC} ${GREEN}ACTIVE${NC}"
+  fi
+
+  # Deteksi interceptor ports
+  local dns_target_port="14053"
+  if [[ -f "$CONFIG_FILE" ]]; then
+    local p_find
+    p_find=$(grep -E '^\s*dns:\s*"?0\.0\.0\.0:[0-9]+' "$CONFIG_FILE" 2>/dev/null | awk -F: '{print $NF}' | tr -d ' "' || echo "")
+    [[ -n "$p_find" ]] && dns_target_port="$p_find"
+  fi
+
+  if command -v ss &>/dev/null; then
+    if ss -uln 2>/dev/null | grep -q ":${dns_target_port} "; then
+      echo -e "   ${GREEN}[✓]${NC} ${WHITE}DNS Interceptor   :${NC} ${CYAN}LISTENING (:${dns_target_port} UDP)${NC}"
+    else
+      echo -e "   ${YELLOW}[!]${NC} ${WHITE}DNS Interceptor   :${NC} ${YELLOW}Binding in progress (:${dns_target_port})${NC}"
+    fi
+
+    if ss -tln 2>/dev/null | grep -q ':14300 '; then
+      echo -e "   ${GREEN}[✓]${NC} ${WHITE}SNI Interceptor   :${NC} ${CYAN}LISTENING (:14300 TCP)${NC}"
+    else
+      echo -e "   ${YELLOW}[!]${NC} ${WHITE}SNI Interceptor   :${NC} ${YELLOW}Binding in progress (:14300)${NC}"
+    fi
+
+    if ss -uln 2>/dev/null | grep -q ':14400 '; then
+      echo -e "   ${GREEN}[✓]${NC} ${WHITE}QUIC Interceptor  :${NC} ${CYAN}LISTENING (:14400 UDP)${NC}"
+    else
+      echo -e "   ${YELLOW}[!]${NC} ${WHITE}QUIC Interceptor  :${NC} ${YELLOW}Binding in progress (:14400)${NC}"
+    fi
+  fi
+
+  # Deteksi nftables redirect
+  if command -v nft &>/dev/null; then
+    if nft list table ip rdns &>/dev/null; then
+      echo -e "   ${GREEN}[✓]${NC} ${WHITE}Netfilter TProxy  :${NC} ${GREEN}ACTIVE (table ip rdns)${NC}"
+    else
+      echo -e "   ${YELLOW}[!]${NC} ${WHITE}Netfilter TProxy  :${NC} ${YELLOW}Awaiting listener sync${NC}"
+    fi
+  fi
+
+  # Deteksi file log
+  if [[ -f /var/log/rdns-client.log ]]; then
+    echo -e "   ${GREEN}[✓]${NC} ${WHITE}Logging Stream    :${NC} ${CYAN}/var/log/rdns-client.log (Siap)${NC}"
+  fi
+  echo ""
+}
+
+start_and_verify_rdns() {
+  info "Memulai dan memverifikasi service rdns-client..."
+
+  # Pastikan file log dibuat sebelum service start
+  mkdir -p /var/log 2>/dev/null || true
+  touch /var/log/rdns-client.log 2>/dev/null || true
+  chmod 644 /var/log/rdns-client.log 2>/dev/null || true
+
+  if command -v systemctl &>/dev/null; then
+    systemctl daemon-reload >/dev/null 2>&1 || true
+    systemctl restart rdns-client 2>/dev/null || true
+  elif command -v rc-service &>/dev/null; then
+    rc-service rdns-client restart >/dev/null 2>&1 || true
+  elif pgrep -x rdns-client &>/dev/null; then
+    pkill -x rdns-client || true
+    sleep 1
+    nohup /usr/local/bin/rdns-client -config "$CONFIG_FILE" >>/var/log/rdns-client.log 2>&1 &
+  fi
+
+  # Deteksi aktif dengan polling hingga 6 detik
+  local active=false
+  for (( i=1; i<=6; i++ )); do
+    sleep 1
+    if is_rdns_active; then
+      active=true
+      break
+    fi
+  done
+
+  if [[ "$active" == "true" ]]; then
+    ok "Service rdns-client BERHASIL AKTIF dan BERJALAN NORMAL!"
+    print_health_summary
+    return 0
+  else
+    err "Service rdns-client GAGAL AKTIF!"
+    echo ""
+    echo -e " ${YELLOW}--- Diagnostik Kegagalan (Log Terakhir) ---${NC}"
+    if command -v journalctl &>/dev/null; then
+      journalctl -u rdns-client -n 15 --no-pager 2>/dev/null || true
+    fi
+    if [[ -s /var/log/rdns-client.log ]]; then
+      echo -e " ${CYAN}Log /var/log/rdns-client.log:${NC}"
+      tail -n 12 /var/log/rdns-client.log 2>/dev/null || true
+    fi
+    echo -e " ${YELLOW}-------------------------------------------${NC}"
+    return 1
   fi
 }
 
-restart_rdns_async() {
-  if command -v systemctl &>/dev/null; then
-    (sleep 1 && systemctl restart rdns-client) >/dev/null 2>&1 &
-  elif command -v rc-service &>/dev/null; then
-    (sleep 1 && rc-service rdns-client restart) >/dev/null 2>&1 &
+reload_rdns() {
+  if command -v systemctl &>/dev/null && systemctl is-active rdns-client &>/dev/null; then
+    systemctl reload rdns-client 2>/dev/null || systemctl restart rdns-client 2>/dev/null || true
+  elif command -v rc-service &>/dev/null && rc-service rdns-client status &>/dev/null; then
+    rc-service rdns-client reload 2>/dev/null || rc-service rdns-client restart 2>/dev/null || true
+  else
+    pkill -HUP -x rdns-client 2>/dev/null || true
+  fi
+  sleep 1
+  if is_rdns_active; then
+    ok "Rules dan konfigurasi rdns-client berhasil direload!"
+  else
+    warn "rdns-client tidak aktif setelah reload. Memulai ulang..."
+    start_and_verify_rdns
   fi
 }
 
@@ -100,7 +325,7 @@ ensure_base_config() {
     info "Generating base configuration: $CONFIG_FILE..."
     cat >"$CONFIG_FILE" <<EOF
 listen:
-  dns:  "0.0.0.0:5353"
+  dns:  "0.0.0.0:14053"
   sni:  "0.0.0.0:14300"
   quic: "0.0.0.0:14400"
 
@@ -130,12 +355,22 @@ tunnel_mark: 0x200
 profiles: []
 EOF
     chmod 644 "$CONFIG_FILE"
+  else
+    # Auto-migrate conflict port 5353 (used by dnsmasq / mDNS) to 14053
+    if grep -q "0.0.0.0:5353" "$CONFIG_FILE" 2>/dev/null; then
+      sed -i 's/0.0.0.0:5353/0.0.0.0:14053/g' "$CONFIG_FILE" 2>/dev/null || true
+    fi
   fi
 
   if [[ ! -f "$RULES_FILE" ]]; then
     echo "{}" >"$RULES_FILE"
     chmod 644 "$RULES_FILE"
   fi
+
+  # Pastikan file log dibuat dengan izin yang tepat
+  mkdir -p /var/log 2>/dev/null || true
+  touch /var/log/rdns-client.log 2>/dev/null || true
+  chmod 644 /var/log/rdns-client.log 2>/dev/null || true
 }
 
 # --- Command: pair ---
@@ -146,6 +381,9 @@ cmd_pair() {
     echo "Usage: rdns-manager pair <rdns://...>"
     exit 1
   fi
+
+  # Pastikan seluruh prasyarat runtime RDNS (binary, service, log) telah terpasang
+  ensure_rdns_installed
 
   if [[ "$token" != rdns://* ]]; then
     err "Invalid token format. Token must begin with 'rdns://'."
@@ -260,14 +498,8 @@ with open(rules_path, 'w') as f:
 EOF
 
   ok "Profile '${profile_name}' paired successfully!"
-  info "Restarting or reloading rdns-client service (safe asynchronous execution)..."
-  if is_rdns_active; then
-    reload_rdns
-    ok "rdns-client reloaded."
-  else
-    restart_rdns_async
-    ok "rdns-client started in background."
-  fi
+  info "Menerapkan konfigurasi dan memverifikasi kesiapan service rdns-client..."
+  start_and_verify_rdns || true
   ui_rule
   ui_kv "Profile Name" "$profile_name" "$GREEN"
   ui_kv "Server Host"  "$server_addr" "$CYAN"
@@ -562,7 +794,141 @@ EOF
 
   rm -f "${CERTS_DIR}/${profile}.crt" "${CERTS_DIR}/${profile}.key" "${CERTS_DIR}/${profile}-ca.crt"
   if is_rdns_active; then
-    restart_rdns_async
+    start_and_verify_rdns || true
+  fi
+}
+
+# --- Command: status ---
+cmd_status() {
+  ui_header "RDNS CLIENT STATUS & RUNTIME"
+  ui_kv "Credit" "github: @risqinf" "$PINK"
+  ui_rule
+
+  if is_rdns_active; then
+    print_health_summary
+  else
+    echo -e "   ${RED}[✗]${NC} ${WHITE}Service rdns-client :${NC} ${RED}INACTIVE / STOPPED${NC}"
+    echo ""
+    if [[ -s /var/log/rdns-client.log ]]; then
+      echo -e " ${CYAN}Log Terakhir /var/log/rdns-client.log:${NC}"
+      tail -n 8 /var/log/rdns-client.log 2>/dev/null || true
+    fi
+  fi
+  ui_rule
+
+  if [[ -f "$CONFIG_FILE" ]]; then
+    python3 - <<'EOF'
+import yaml, json, os
+
+cfg_file = "/etc/rdns/client.yaml"
+rules_file = "/etc/rdns/rules.json"
+
+try:
+    with open(cfg_file, 'r') as f:
+        cfg = yaml.safe_load(f) or {}
+    profiles = cfg.get('profiles', [])
+except Exception:
+    profiles = []
+
+try:
+    with open(rules_file, 'r') as f:
+        rules = json.load(f) or {}
+except Exception:
+    rules = {}
+
+print(f" \033[1;37mProfil Terdaftar :\033[0m \033[0;36m{len(profiles)} node(s)\033[0m")
+for p in profiles:
+    name = p.get('name', 'N/A')
+    r_count = len(rules.get(name, []))
+    print(f"   \033[38;5;205m•\033[0m \033[1;32m{name}\033[0m ➔ Server: \033[0;36m{p.get('server')}\033[0m (Rules: \033[1;33m{r_count} domains\033[0m)")
+EOF
+  fi
+  ui_foot
+}
+
+# --- Command: doctor ---
+cmd_doctor() {
+  ui_header "RDNS SYSTEM DOCTOR & DIAGNOSTICS"
+  ui_kv "Credit" "github: @risqinf" "$PINK"
+  ui_rule
+
+  echo -e " ${WHITE}Memeriksa integritas dependensi dan konfigurasi...${NC}\n"
+
+  # 1. Binary check
+  if [[ -x /usr/local/bin/rdns-client ]]; then
+    local ver
+    ver=$(/usr/local/bin/rdns-client --version 2>&1 || echo "unknown")
+    echo -e "   ${GREEN}[PASS]${NC} ${WHITE}Binary rdns-client  :${NC} ${GREEN}/usr/local/bin/rdns-client (${ver})${NC}"
+  else
+    echo -e "   ${RED}[FAIL]${NC} ${WHITE}Binary rdns-client  :${NC} ${RED}TIDAK DITEMUKAN di /usr/local/bin/rdns-client${NC}"
+  fi
+
+  # 2. Service unit check
+  if [[ -f /etc/systemd/system/rdns-client.service ]]; then
+    echo -e "   ${GREEN}[PASS]${NC} ${WHITE}Systemd Unit File   :${NC} ${GREEN}/etc/systemd/system/rdns-client.service${NC}"
+  else
+    echo -e "   ${YELLOW}[WARN]${NC} ${WHITE}Systemd Unit File   :${NC} ${YELLOW}Belum dibuat${NC}"
+  fi
+
+  # 3. Log file check
+  if [[ -f /var/log/rdns-client.log ]]; then
+    echo -e "   ${GREEN}[PASS]${NC} ${WHITE}Log File Path       :${NC} ${GREEN}/var/log/rdns-client.log (Siap)${NC}"
+  else
+    echo -e "   ${YELLOW}[WARN]${NC} ${WHITE}Log File Path       :${NC} ${YELLOW}/var/log/rdns-client.log belum dibuat${NC}"
+  fi
+
+  # 4. Config files check
+  if [[ -f "$CONFIG_FILE" ]]; then
+    echo -e "   ${GREEN}[PASS]${NC} ${WHITE}Config File         :${NC} ${GREEN}${CONFIG_FILE}${NC}"
+  else
+    echo -e "   ${YELLOW}[WARN]${NC} ${WHITE}Config File         :${NC} ${YELLOW}Belum ada profil dipairing${NC}"
+  fi
+
+  if [[ -f "$RULES_FILE" ]]; then
+    echo -e "   ${GREEN}[PASS]${NC} ${WHITE}Rules File          :${NC} ${GREEN}${RULES_FILE}${NC}"
+  else
+    echo -e "   ${YELLOW}[WARN]${NC} ${WHITE}Rules File          :${NC} ${YELLOW}${RULES_FILE} belum dibuat${NC}"
+  fi
+
+  # 5. Kernel & nftables check
+  if command -v nft &>/dev/null; then
+    echo -e "   ${GREEN}[PASS]${NC} ${WHITE}Kernel Netfilter    :${NC} ${GREEN}nftables command line OK${NC}"
+  else
+    echo -e "   ${RED}[FAIL]${NC} ${WHITE}Kernel Netfilter    :${NC} ${RED}nft command tidak ditemukan!${NC}"
+  fi
+
+  # 6. Service active check
+  if is_rdns_active; then
+    echo -e "   ${GREEN}[PASS]${NC} ${WHITE}Runtime Status      :${NC} ${GREEN}Service Sedang Berjalan (Active)${NC}"
+    print_health_summary
+  else
+    echo -e "   ${YELLOW}[INFO]${NC} ${WHITE}Runtime Status      :${NC} ${YELLOW}Service Belum Berjalan (Inactive)${NC}"
+  fi
+
+  ui_foot
+}
+
+# --- Command: restart ---
+cmd_restart() {
+  ensure_rdns_installed
+  start_and_verify_rdns
+}
+
+# --- Command: logs ---
+cmd_logs() {
+  local follow="${1:-}"
+  if [[ "$follow" == "-f" || "$follow" == "follow" ]]; then
+    if [[ -f /var/log/rdns-client.log ]]; then
+      tail -f /var/log/rdns-client.log
+    elif command -v journalctl &>/dev/null; then
+      journalctl -u rdns-client -f
+    fi
+  else
+    if [[ -f /var/log/rdns-client.log ]]; then
+      tail -n 35 /var/log/rdns-client.log
+    elif command -v journalctl &>/dev/null; then
+      journalctl -u rdns-client -n 35 --no-pager
+    fi
   fi
 }
 
@@ -592,9 +958,21 @@ case "${1:-}" in
   remove-profile)
     shift; cmd_remove_profile "$@"
     ;;
+  status)
+    cmd_status
+    ;;
+  doctor)
+    cmd_doctor
+    ;;
+  restart)
+    cmd_restart
+    ;;
+  logs)
+    shift; cmd_logs "$@"
+    ;;
   *)
     echo "RDNS Manager CLI (github: @risqinf)"
-    echo "Usage: rdns-manager <pair|add-rule|remove-rule|load-preset|remove-preset|list-rules|test-domain|remove-profile>"
+    echo "Usage: rdns-manager <pair|add-rule|remove-rule|load-preset|remove-preset|list-rules|test-domain|remove-profile|status|doctor|restart|logs>"
     exit 1
     ;;
 esac

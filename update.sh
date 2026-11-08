@@ -153,16 +153,23 @@ fi
 print_ok "Command scripts updated."
 
 # 3. Update RDNS presets & service (preserves existing rules.json & client.yaml)
-print_info "Updating SmartDNS / RDNS presets..."
+print_info "Updating SmartDNS / RDNS presets and service..."
+mkdir -p /usr/local/sbin/rdns/presets /etc/rdns/presets /etc/rdns/certs /var/log
+touch /var/log/rdns-client.log && chmod 644 /var/log/rdns-client.log 2>/dev/null || true
+
 if [[ -d "$srcdir/scripts/rdns/presets" ]]; then
-  mkdir -p /usr/local/sbin/rdns/presets /etc/rdns/presets
   cp -rf "$srcdir/scripts/rdns/presets/"*.json /usr/local/sbin/rdns/presets/ 2>/dev/null || true
   cp -rf "$srcdir/scripts/rdns/presets/"*.json /etc/rdns/presets/ 2>/dev/null || true
 fi
 
-# Ensure rdns-client systemd service template exists with failsafe cleanup
+# Ensure python3-pyyaml is available
+if command -v python3 &>/dev/null && ! python3 -c "import yaml" 2>/dev/null; then
+  dnf install -y python3-pyyaml >/dev/null 2>&1 || apt-get install -y python3-yaml >/dev/null 2>&1 || true
+fi
+
+# Ensure rdns-client systemd service template exists with failsafe cleanup & pre-start log touch
 if command -v systemctl &>/dev/null; then
-  if [[ ! -f /etc/systemd/system/rdns-client.service ]] || ! grep -q "ExecStopPost" /etc/systemd/system/rdns-client.service 2>/dev/null; then
+  if [[ ! -f /etc/systemd/system/rdns-client.service ]] || ! grep -q "ExecStartPre" /etc/systemd/system/rdns-client.service 2>/dev/null; then
     cat > /etc/systemd/system/rdns-client.service <<'EOF_RDNS_SVC'
 [Unit]
 Description=rdns-client (decision node: split DNS + SNI traffic router)
@@ -173,6 +180,7 @@ Wants=network-online.target
 [Service]
 Type=simple
 User=root
+ExecStartPre=-/bin/sh -c 'mkdir -p /var/log /etc/rdns/certs && touch /var/log/rdns-client.log && chmod 644 /var/log/rdns-client.log 2>/dev/null || true'
 ExecStart=/usr/local/bin/rdns-client -config /etc/rdns/client.yaml
 ExecReload=/bin/kill -HUP $MAINPID
 SyslogIdentifier=rdns-client
@@ -180,12 +188,12 @@ AmbientCapabilities=NET_ADMIN
 CapabilityBoundingSet=NET_ADMIN
 NoNewPrivileges=true
 ProtectSystem=strict
-ReadWritePaths=/var/log/rdns-client.log
+ReadWritePaths=/var/log /var/log/rdns-client.log /etc/rdns
 ProtectHome=true
 PrivateTmp=true
 LimitNOFILE=65536
 Restart=always
-RestartSec=5
+RestartSec=3
 TimeoutStopSec=15
 ExecStopPost=-/usr/sbin/nft delete table ip rdns
 ExecStopPost=-/usr/sbin/nft delete table ip6 rdns
@@ -194,6 +202,7 @@ ExecStopPost=-/usr/sbin/nft delete table ip6 rdns
 WantedBy=multi-user.target
 EOF_RDNS_SVC
     systemctl daemon-reload >/dev/null 2>&1 || true
+    systemctl enable rdns-client >/dev/null 2>&1 || true
   fi
 fi
 
@@ -206,10 +215,18 @@ if [[ ! -x /usr/local/bin/rdns-client ]]; then
     *) R_ARCH="" ;;
   esac
   if [[ -n "$R_ARCH" ]]; then
-    print_info "Installing static rdns-client binary (v0.2.0)..."
-    curl -sSL --connect-timeout 10 --max-time 30 -o /usr/local/bin/rdns-client \
-      "https://github.com/risqinf/rdns/releases/download/v0.2.0/rdns-client-linux-${R_ARCH}" 2>/dev/null || true
-    chmod 755 /usr/local/bin/rdns-client 2>/dev/null || true
+    if [[ -x "$srcdir/bin/rdns-client-linux-${R_ARCH}" ]]; then
+      cp -f "$srcdir/bin/rdns-client-linux-${R_ARCH}" /usr/local/bin/rdns-client
+      chmod 755 /usr/local/bin/rdns-client
+    elif [[ -x "/home/risqinf/Project-Real/rdns/dist/rdns-client-linux-${R_ARCH}" ]]; then
+      cp -f "/home/risqinf/Project-Real/rdns/dist/rdns-client-linux-${R_ARCH}" /usr/local/bin/rdns-client
+      chmod 755 /usr/local/bin/rdns-client
+    else
+      print_info "Installing static rdns-client binary (v0.2.1)..."
+      curl -sSL --connect-timeout 10 --max-time 30 -o /usr/local/bin/rdns-client \
+        "https://github.com/risqinf/rdns/releases/download/v0.2.1/rdns-client-linux-${R_ARCH}" 2>/dev/null || true
+      chmod 755 /usr/local/bin/rdns-client 2>/dev/null || true
+    fi
   fi
 fi
 print_ok "RDNS components updated."

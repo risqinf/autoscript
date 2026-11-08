@@ -119,8 +119,10 @@ menu_rdns() {
   ui_opt 8  "Lihat Semua Routing Rules Aktif"
   ui_opt 9  "Test Routing Domain (Dry-Run Matcher)"
   ui_rule
-  ui_label "MAINTENANCE"
+  ui_label "MAINTENANCE & MONITORING"
   ui_opt 10 "Restart / Reload Service rdns-client"
+  ui_opt 11 "Lihat Log Real-Time (rdns-client.log)"
+  ui_opt 12 "Diagnostik & Cek Kesehatan Sistem (Doctor)"
   ui_rule
   ui_opt 0  "Kembali ke Menu Utama"
   ui_foot
@@ -138,8 +140,39 @@ menu_rdns() {
       if [[ -z "$user_token" ]]; then
         err "Token tidak boleh kosong."
       else
-        info "Memproses token pairing..."
-        bash "$RDNS_MGR" pair "$user_token" || true
+        info "Memproses token pairing dan verifikasi service..."
+        if bash "$RDNS_MGR" pair "$user_token"; then
+          # Cek apakah profil yang baru saja dipair memiliki domain rules
+          local current_profs; current_profs=$(get_profile_list)
+          local last_prof; last_prof=$(echo "$current_profs" | awk '{print $NF}')
+          if [[ -n "$last_prof" ]]; then
+            local p_rules_count
+            p_rules_count=$(python3 -c "import json; r=json.load(open('/etc/rdns/rules.json')); print(len(r.get('$last_prof',[])))" 2>/dev/null || echo "0")
+            if [[ "$p_rules_count" -eq 0 ]]; then
+              echo ""
+              ui_rule
+              echo -e " ${GREEN}Node '${last_prof}' berhasil terhubung dan service aktif!${NC}"
+              echo -e " ${YELLOW}Saat ini node belum memiliki domain rules. Terapkan preset sekarang?${NC}"
+              echo ""
+              echo -e " ${PINK}(• 1)${NC} ${WHITE}│ Streaming & OTT Populer (Netflix, Disney+, Viu, Vidio, Prime, HBO)${NC}"
+              echo -e " ${PINK}(• 2)${NC} ${WHITE}│ Malaysia Region (.my, Maybank, CIMB, TNG, Boost, Astro, Sooka)${NC}"
+              echo -e " ${PINK}(• 3)${NC} ${WHITE}│ Indonesia Region (.id, BCA, Mandiri, BRI, BNI, Dana, GoPay, Pajak)${NC}"
+              echo -e " ${PINK}(• 4)${NC} ${WHITE}│ AI Services (OpenAI ChatGPT, Claude, Gemini, Copilot, Perplexity)${NC}"
+              echo -e " ${PINK}(• 5)${NC} ${WHITE}│ Bypass IP Check (ipinfo, speedtest, fast.com)${NC}"
+              echo -e " ${PINK}(• 0)${NC} ${WHITE}│ Lewati (Konfigurasi manual nanti)${NC}"
+              echo ""
+              read -rp " Pilih preset awal [0-5]: " init_preset
+              case "$init_preset" in
+                1) bash "$RDNS_MGR" load-preset "$last_prof" "streaming" ;;
+                2) bash "$RDNS_MGR" load-preset "$last_prof" "malaysia" ;;
+                3) bash "$RDNS_MGR" load-preset "$last_prof" "indonesia" ;;
+                4) bash "$RDNS_MGR" load-preset "$last_prof" "ai-services" ;;
+                5) bash "$RDNS_MGR" load-preset "$last_prof" "ipcheck" ;;
+                *) info "Konfigurasi rules dilewati. Anda dapat menambahkannya nanti melalui menu." ;;
+              esac
+            fi
+          fi
+        fi
       fi
       ui_foot
       ui_back
@@ -153,7 +186,7 @@ menu_rdns() {
       ui_rule
       if [[ -f /etc/rdns/client.yaml ]]; then
         python3 - <<'EOF'
-import yaml
+import yaml, socket
 try:
     with open('/etc/rdns/client.yaml', 'r') as f:
         cfg = yaml.safe_load(f) or {}
@@ -163,7 +196,15 @@ try:
     else:
         print(f" \033[1;37mTotal Exit Nodes Terdaftar:\033[0m \033[0;36m{len(profiles)}\033[0m\n")
         for i, p in enumerate(profiles, 1):
-            print(f" \033[38;5;205m(•{i:2d})\033[0m \033[1;37m│\033[0m \033[1;32m{p.get('name')}\033[0m")
+            server = p.get('server', '')
+            host, _, port = server.partition(':')
+            status_conn = "\033[1;32mONLINE / REACHABLE\033[0m"
+            try:
+                s = socket.create_connection((host, int(port) if port else 443), timeout=2.0)
+                s.close()
+            except Exception:
+                status_conn = "\033[1;31mOFFLINE / UNREACHABLE\033[0m"
+            print(f" \033[38;5;205m(•{i:2d})\033[0m \033[1;37m│\033[0m \033[1;32m{p.get('name')}\033[0m  [{status_conn}]")
             print(f"       \033[0;36mServer Host  :\033[0m {p.get('server')}")
             print(f"       \033[0;36mServer Name  :\033[0m {p.get('server_name')}")
             print(f"       \033[0;36mDNS Upstream :\033[0m {p.get('dns')}")
@@ -378,17 +419,27 @@ EOF
 
     10)
       clear
-      ui_header "RESTART / RELOAD RDNS SERVICE"
+      bash "$RDNS_MGR" restart || true
+      ui_foot
+      ui_back
+      menu_rdns
+      ;;
+
+    11)
+      clear
+      ui_header "LOG RUNTIME RDNS CLIENT"
       ui_kv "Credit" "github: @risqinf" "$PINK"
       ui_rule
-      info "Reloading / restarting rdns-client..."
-      systemctl restart rdns-client 2>/dev/null || true
-      sleep 1
-      if systemctl is-active rdns-client &>/dev/null; then
-        ok "rdns-client berhasil direstart dan berjalan aktif!"
-      else
-        warn "rdns-client tidak aktif. Cek log dengan: journalctl -u rdns-client -n 20"
-      fi
+      echo -e " ${WHITE}Menampilkan 35 baris log terakhir (/var/log/rdns-client.log):${NC}\n"
+      bash "$RDNS_MGR" logs || true
+      ui_foot
+      ui_back
+      menu_rdns
+      ;;
+
+    12)
+      clear
+      bash "$RDNS_MGR" doctor || true
       ui_foot
       ui_back
       menu_rdns

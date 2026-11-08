@@ -246,7 +246,7 @@ sleep 1
 enable_el_repositories
 
 print_info "Installing core dependencies..."
-dnf install -y wget curl openssl sudo binutils coreutils gnupg2 bc htop lsof jq sqlite tar gzip bzip2 xz unzip python3 util-linux policycoreutils policycoreutils-python-utils >/dev/null 2>&1
+dnf install -y wget curl openssl sudo binutils coreutils gnupg2 bc htop lsof jq sqlite tar gzip bzip2 xz unzip python3 python3-pyyaml util-linux policycoreutils policycoreutils-python-utils >/dev/null 2>&1
 dnf install -y vnstat ruby rubygems >/dev/null 2>&1 || true
 command -v gem >/dev/null 2>&1 && gem install lolcat >/dev/null 2>&1 || true
 if systemctl list-unit-files vnstat.service >/dev/null 2>&1; then
@@ -375,11 +375,71 @@ menu_install_logic() {
     install -m 0755 "$file" "/usr/local/sbin/api/$name"
   done
 
-  # Install RDNS presets into /usr/local/sbin/rdns/presets and /etc/rdns/presets
+  # Install RDNS presets and ensure directories
+  mkdir -p /usr/local/sbin/rdns/presets /etc/rdns/presets /etc/rdns/certs /var/log
+  touch /var/log/rdns-client.log && chmod 644 /var/log/rdns-client.log 2>/dev/null || true
   if [[ -d "$srcdir/scripts/rdns/presets" ]]; then
-    mkdir -p /usr/local/sbin/rdns/presets /etc/rdns/presets
     cp -rf "$srcdir/scripts/rdns/presets/"*.json /usr/local/sbin/rdns/presets/ 2>/dev/null || true
     cp -rf "$srcdir/scripts/rdns/presets/"*.json /etc/rdns/presets/ 2>/dev/null || true
+  fi
+
+  # Install rdns-client systemd service template
+  if command -v systemctl &>/dev/null; then
+    cat > /etc/systemd/system/rdns-client.service <<'EOF_RDNS_SVC'
+[Unit]
+Description=rdns-client (decision node: split DNS + SNI traffic router)
+Documentation=https://github.com/risqinf/rdns
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=root
+ExecStartPre=-/bin/sh -c 'mkdir -p /var/log /etc/rdns/certs && touch /var/log/rdns-client.log && chmod 644 /var/log/rdns-client.log 2>/dev/null || true'
+ExecStart=/usr/local/bin/rdns-client -config /etc/rdns/client.yaml
+ExecReload=/bin/kill -HUP $MAINPID
+SyslogIdentifier=rdns-client
+AmbientCapabilities=NET_ADMIN
+CapabilityBoundingSet=NET_ADMIN
+NoNewPrivileges=true
+ProtectSystem=strict
+ReadWritePaths=/var/log /var/log/rdns-client.log /etc/rdns
+ProtectHome=true
+PrivateTmp=true
+LimitNOFILE=65536
+Restart=always
+RestartSec=3
+TimeoutStopSec=15
+ExecStopPost=-/usr/sbin/nft delete table ip rdns
+ExecStopPost=-/usr/sbin/nft delete table ip6 rdns
+
+[Install]
+WantedBy=multi-user.target
+EOF_RDNS_SVC
+    systemctl daemon-reload >/dev/null 2>&1 || true
+    systemctl enable rdns-client >/dev/null 2>&1 || true
+  fi
+
+  # Ensure static rdns-client binary is installed
+  if [[ ! -x /usr/local/bin/rdns-client ]]; then
+    local r_arch=""
+    case "$(uname -m)" in
+      x86_64|amd64) r_arch="amd64" ;;
+      aarch64|arm64) r_arch="arm64" ;;
+    esac
+    if [[ -n "$r_arch" ]]; then
+      if [[ -x "$srcdir/bin/rdns-client-linux-${r_arch}" ]]; then
+        cp -f "$srcdir/bin/rdns-client-linux-${r_arch}" /usr/local/bin/rdns-client
+        chmod 755 /usr/local/bin/rdns-client
+      elif [[ -x "/home/risqinf/Project-Real/rdns/dist/rdns-client-linux-${r_arch}" ]]; then
+        cp -f "/home/risqinf/Project-Real/rdns/dist/rdns-client-linux-${r_arch}" /usr/local/bin/rdns-client
+        chmod 755 /usr/local/bin/rdns-client
+      else
+        curl -sSL --connect-timeout 10 --max-time 30 -o /usr/local/bin/rdns-client \
+          "https://github.com/risqinf/rdns/releases/download/v0.2.1/rdns-client-linux-${r_arch}" 2>/dev/null || true
+        chmod 755 /usr/local/bin/rdns-client 2>/dev/null || true
+      fi
+    fi
   fi
 
   # Cache prebuilt hardened binaries (Dropbear 2019.78, dnstt-server) locally if bundled

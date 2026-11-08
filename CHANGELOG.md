@@ -3,6 +3,35 @@
 All notable changes to this project are documented here.
 This project adheres to [Semantic Versioning](https://semver.org/).
 
+## [5.6.2] - 2026-11-08
+
+RDNS Integration Hardening, Active Detection & Diagnostics Engine, Collision-Free Interceptor Ports, and 1-Click Preset Setup: **Release 5.6.2**.
+
+### Fixed
+- **Port Conflict Resolution (`0.0.0.0:14053`)**:
+  - Relocated RDNS local DNS interceptor from `5353` to `14053` to prevent fatal port collisions with autoscript's native telemetry sniffer (`dnsmasq` on `:5353`) and mDNS resolvers.
+  - Automatically migrates legacy `0.0.0.0:5353` entries in `/etc/rdns/client.yaml` to `0.0.0.0:14053`.
+- **Zero-Domain & Empty Ruleset Crash Fix (`rdns`)**:
+  - Fixed fatal crash on startup when pairing a new exit node with 0 initial domains or an empty `{}` ruleset.
+- **Log File & Strict Mount Hardening**:
+  - Resolved `ProtectSystem=strict` write block by adding `ExecStartPre` to pre-create `/var/log/rdns-client.log` and granting `/var/log` in `ReadWritePaths`.
+  - Added graceful fallback in `rdns-client` to stderr logging if the log file path is unwritable.
+
+### Added
+- **Active Detection & Runtime Health Verification (`rdns-manager`, `menu-rdns`)**:
+  - Replaced silent background subshells with synchronous start/restart, active detection polling (up to 6s), and real-time status diagnostics.
+  - Interactive status checklist verifying daemon PID, DNS interceptor (:14053), SNI interceptor (:14300), QUIC interceptor (:14400), Netfilter TProxy rules, and log stream.
+  - Comprehensive diagnostic dumping from `journalctl -u rdns-client` and `/var/log/rdns-client.log` on any startup issue.
+- **Auto-Bootstrapping Engine**:
+  - Automatically verifies and installs `/usr/local/bin/rdns-client`, `/etc/systemd/system/rdns-client.service`, `python3-pyyaml`, and log directories upon pairing or update.
+- **Instant Preset Setup on Pairing**:
+  - Interactive recommendation prompt immediately after pairing allowing 1-click loading of presets (`streaming`, `malaysia`, `indonesia`, `ai-services`, `ipcheck`).
+- **New Maintenance Tools**:
+  - `rdns-manager doctor` / `menu-rdns (12)`: System diagnostic audit tool.
+  - `rdns-manager logs` / `menu-rdns (11)`: Real-time runtime log monitor.
+  - `rdns-manager status`: Full health check and profile route breakdown.
+  - Exit node reachability probe (Online / Offline status badge in node detail view).
+
 ## [5.6.1] - 2026-11-06
 
 SmartDNS / RDNS Split Routing Native Integration, Media CDN Direct Bypass (>99% Bandwidth Savings), Safe Non-Destructive Update Engine, and Multi-Distro (EL9/EL10 & Alpine) Support: **Release 5.6.1**.
