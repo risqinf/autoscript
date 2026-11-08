@@ -85,6 +85,12 @@ ensure_rdns_installed() {
     chmod 644 "/var/log/rdns-client.log" 2>/dev/null || true
   fi
 
+  # Auto-migrate legacy port 5353 ke 14053 jika konfigurasi client lama ditemukan
+  if [[ -f "$CONFIG_FILE" ]] && grep -q "0.0.0.0:5353" "$CONFIG_FILE" 2>/dev/null; then
+    info "Migrasi otomatis: memindahkan DNS interceptor dari port 5353 ke 14053..."
+    sed -i 's/0.0.0.0:5353/0.0.0.0:14053/g' "$CONFIG_FILE" 2>/dev/null || true
+  fi
+
   # 2. Pastikan dependensi PyYAML tersedia jika Python digunakan
   if command -v python3 &>/dev/null; then
     if ! python3 -c "import yaml" 2>/dev/null; then
@@ -101,9 +107,17 @@ ensure_rdns_installed() {
     fi
   fi
 
-  # 3. Pastikan binary rdns-client terpasang di /usr/local/bin
+  # 3. Pastikan binary rdns-client terpasang di /usr/local/bin dan up-to-date (v0.2.1)
+  local need_binary_install=false
   if [[ ! -x /usr/local/bin/rdns-client ]]; then
-    info "Binary /usr/local/bin/rdns-client belum ditemukan. Melakukan instalasi..."
+    need_binary_install=true
+  elif ! /usr/local/bin/rdns-client -version 2>/dev/null | grep -q "v0.2.1"; then
+    info "Versi rdns-client terpasang ($(/usr/local/bin/rdns-client -version 2>/dev/null || echo 'lama')) perlu diupdate ke v0.2.1..."
+    need_binary_install=true
+  fi
+
+  if [[ "$need_binary_install" == "true" ]]; then
+    info "Binary /usr/local/bin/rdns-client sedang dipasang/diperbarui..."
     local arch
     case "$(uname -m)" in
       x86_64|amd64) arch="amd64" ;;
@@ -142,7 +156,7 @@ ensure_rdns_installed() {
     if [[ ! -x /usr/local/bin/rdns-client ]]; then
       warn "Binary /usr/local/bin/rdns-client belum terpasang (memerlukan izin root)."
     else
-      ok "Binary rdns-client berhasil dipasang di /usr/local/bin/rdns-client"
+      ok "Binary rdns-client berhasil dipasang di /usr/local/bin/rdns-client ($(/usr/local/bin/rdns-client -version 2>/dev/null || echo 'v0.2.1'))"
     fi
   fi
 
@@ -932,6 +946,23 @@ cmd_logs() {
   fi
 }
 
+cmd_update() {
+  ui_rule
+  echo -e " ${GREEN}MEMPERBARUI BINARY & INTEGRASI RDNS CLIENT...${NC}"
+  ui_rule
+  ensure_rdns_installed
+  if [[ -f "$CONFIG_FILE" ]] && grep -q "0.0.0.0:5353" "$CONFIG_FILE" 2>/dev/null; then
+    sed -i 's/0.0.0.0:5353/0.0.0.0:14053/g' "$CONFIG_FILE" 2>/dev/null || true
+    info "Migrasi konfigurasi 5353 -> 14053 selesai."
+  fi
+  if is_rdns_active; then
+    info "Merestart service rdns-client..."
+    start_and_verify_rdns
+  else
+    ok "rdns-client siap digunakan. Versi: $(/usr/local/bin/rdns-client -version 2>/dev/null || echo 'v0.2.1')"
+  fi
+}
+
 # --- CLI Dispatcher ---
 case "${1:-}" in
   pair)
@@ -969,6 +1000,9 @@ case "${1:-}" in
     ;;
   logs)
     shift; cmd_logs "$@"
+    ;;
+  update)
+    cmd_update
     ;;
   *)
     echo "RDNS Manager CLI (github: @risqinf)"

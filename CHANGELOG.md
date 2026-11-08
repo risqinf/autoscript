@@ -18,6 +18,10 @@ RDNS Integration Hardening, Active Detection & Diagnostics Engine, Collision-Fre
   - Added graceful fallback in `rdns-client` to stderr logging if the log file path is unwritable.
 
 ### Added
+- **Seamless Backward Compatibility & Auto-Migration Engine (`update.sh`, `scripts/system/update.sh`)**:
+  - Automatically checks existing `/usr/local/bin/rdns-client` version and upgrades to `v0.2.1` whenever update script runs, without touching user's rules or certificates.
+  - Automatically migrates existing `/etc/rdns/client.yaml` from port 5353 to 14053 and restarts `rdns-client` seamlessly if it was active.
+  - Guarantees 100% backward compatibility with existing exit nodes running `rdns-server` v0.2.0 or earlier.
 - **Active Detection & Runtime Health Verification (`rdns-manager`, `menu-rdns`)**:
   - Replaced silent background subshells with synchronous start/restart, active detection polling (up to 6s), and real-time status diagnostics.
   - Interactive status checklist verifying daemon PID, DNS interceptor (:14053), SNI interceptor (:14300), QUIC interceptor (:14400), Netfilter TProxy rules, and log stream.
@@ -27,6 +31,7 @@ RDNS Integration Hardening, Active Detection & Diagnostics Engine, Collision-Fre
 - **Instant Preset Setup on Pairing**:
   - Interactive recommendation prompt immediately after pairing allowing 1-click loading of presets (`streaming`, `malaysia`, `indonesia`, `ai-services`, `ipcheck`).
 - **New Maintenance Tools**:
+  - `rdns-manager update` / `menu-rdns (13)`: On-demand RDNS client binary update and service synchronization tool.
   - `rdns-manager doctor` / `menu-rdns (12)`: System diagnostic audit tool.
   - `rdns-manager logs` / `menu-rdns (11)`: Real-time runtime log monitor.
   - `rdns-manager status`: Full health check and profile route breakdown.

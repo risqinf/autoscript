@@ -206,8 +206,16 @@ EOF_RDNS_SVC
   fi
 fi
 
-# Ensure rdns-client binary exists
+# Ensure rdns-client binary is installed and up-to-date (v0.2.1)
+NEED_RDNS_CLIENT_UPDATE=false
 if [[ ! -x /usr/local/bin/rdns-client ]]; then
+  NEED_RDNS_CLIENT_UPDATE=true
+elif ! /usr/local/bin/rdns-client -version 2>/dev/null | grep -q "v0.2.1"; then
+  print_info "Updating rdns-client binary ($(/usr/local/bin/rdns-client -version 2>/dev/null || echo 'old')) to v0.2.1..."
+  NEED_RDNS_CLIENT_UPDATE=true
+fi
+
+if [[ "$NEED_RDNS_CLIENT_UPDATE" == "true" ]]; then
   UNAME_ARCH="$(uname -m)"
   case "$UNAME_ARCH" in
     x86_64|amd64) R_ARCH="amd64" ;;
@@ -228,6 +236,19 @@ if [[ ! -x /usr/local/bin/rdns-client ]]; then
       chmod 755 /usr/local/bin/rdns-client 2>/dev/null || true
     fi
   fi
+fi
+
+# Auto-migrate legacy configuration port 5353 -> 14053
+if [[ -f /etc/rdns/client.yaml ]] && grep -q "0.0.0.0:5353" /etc/rdns/client.yaml 2>/dev/null; then
+  sed -i 's/0.0.0.0:5353/0.0.0.0:14053/g' /etc/rdns/client.yaml 2>/dev/null || true
+  print_info "Migrated legacy port 5353 -> 14053 in /etc/rdns/client.yaml"
+fi
+
+# Safely restart rdns-client if active
+if command -v systemctl &>/dev/null && systemctl is-active rdns-client &>/dev/null; then
+  print_info "Restarting rdns-client to apply latest binary and configuration..."
+  systemctl daemon-reload >/dev/null 2>&1 || true
+  systemctl restart rdns-client >/dev/null 2>&1 || true
 fi
 print_ok "RDNS components updated."
 

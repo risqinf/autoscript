@@ -123,6 +123,7 @@ menu_rdns() {
   ui_opt 10 "Restart / Reload Service rdns-client"
   ui_opt 11 "Lihat Log Real-Time (rdns-client.log)"
   ui_opt 12 "Diagnostik & Cek Kesehatan Sistem (Doctor)"
+  ui_opt 13 "Update / Sinkronkan Binary rdns-client (v0.2.1)"
   ui_rule
   ui_opt 0  "Kembali ke Menu Utama"
   ui_foot
@@ -440,6 +441,14 @@ EOF
     12)
       clear
       bash "$RDNS_MGR" doctor || true
+      ui_foot
+      ui_back
+      menu_rdns
+      ;;
+
+    13)
+      clear
+      bash "$RDNS_MGR" update || true
       ui_foot
       ui_back
       menu_rdns
