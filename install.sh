@@ -7,6 +7,7 @@
 # License: Apache License 2.0 (see LICENSE file)
 # Repository: https://github.com/risqinf/autoscript
 # ========================================================
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd || echo "")"
 AS_VERSION="5.6.1"
 # --- Color Definitions ---
 NC='\033[0m'
@@ -342,17 +343,30 @@ REPO_BRANCH="${REPO_BRANCH:-main}"
 REPO_TARBALL="https://github.com/${REPO_OWNER}/${REPO_NAME}/archive/refs/heads/${REPO_BRANCH}.tar.gz"
 
 menu_install_logic() {
-  print_info "Downloading management menu..."
-  dnf install tar gzip -y >/dev/null 2>&1
+  local srcdir=""
+  local tmpdir=""
 
-  local tmpdir
-  tmpdir=$(mktemp -d)
-  wget -qO "$tmpdir/repo.tar.gz" "$REPO_TARBALL"
-  tar -xzf "$tmpdir/repo.tar.gz" -C "$tmpdir"
+  if [[ -n "$SCRIPT_DIR" && -d "$SCRIPT_DIR/scripts/lib" ]]; then
+    print_info "Using local repository source from ${SCRIPT_DIR}..."
+    srcdir="$SCRIPT_DIR"
+  else
+    print_info "Fetching management menu and scripts (latest depth 1)..."
+    dnf install -y git tar gzip curl wget >/dev/null 2>&1 || true
+    tmpdir=$(mktemp -d)
 
-  local srcdir
-  srcdir=$(find "$tmpdir" -mindepth 1 -maxdepth 1 -type d | head -1)
-  [[ -z "$srcdir" ]] && srcdir="$tmpdir/${REPO_NAME}-${REPO_BRANCH}"
+    # Primary: git clone depth 1 to fetch the absolute latest commit
+    if git clone --depth 1 -b "${REPO_BRANCH}" "https://github.com/${REPO_OWNER}/${REPO_NAME}.git" "$tmpdir/repo" >/dev/null 2>&1; then
+      srcdir="$tmpdir/repo"
+    else
+      # Secondary: tarball archive fallback
+      print_info "Git clone fallback: downloading archive tarball..."
+      if curl -sSL -o "$tmpdir/repo.tar.gz" "$REPO_TARBALL" 2>/dev/null || wget -qO "$tmpdir/repo.tar.gz" "$REPO_TARBALL" 2>/dev/null; then
+        tar -xzf "$tmpdir/repo.tar.gz" -C "$tmpdir" 2>/dev/null
+        srcdir=$(find "$tmpdir" -mindepth 1 -maxdepth 1 -type d ! -name "repo" | head -1)
+        [[ -z "$srcdir" ]] && srcdir="$tmpdir/${REPO_NAME}-${REPO_BRANCH}"
+      fi
+    fi
+  fi
 
   # Install shared libraries into /usr/local/sbin/lib (sourced, not commands).
   mkdir -p /usr/local/sbin/lib
@@ -462,7 +476,7 @@ EOF_RDNS_SVC
   ln -sf /usr/local/sbin/update /usr/local/sbin/autoscript-update 2>/dev/null || true
   [[ -f "$srcdir/VERSION" ]] && cp -f "$srcdir/VERSION" /usr/local/sbin/VERSION 2>/dev/null || true
 
-  rm -rf "$tmpdir"
+  [[ -n "$tmpdir" && -d "$tmpdir" ]] && rm -rf "$tmpdir"
   print_success "Menu scripts and libraries integrated."
 }
 
@@ -1398,24 +1412,25 @@ else
   print_info "SELinux disabled or not present; skipping booleans."
 fi
 
-# Nginx & Certificate Setup
-print_info "Obtaining SSL Certificates (Let's Encrypt)..."
-dnf install socat lsof certbot -y >/dev/null 2>&1
-systemctl stop httpd nginx >/dev/null 2>&1
-certbot certonly --standalone --preferred-challenges http --agree-tos --email www@${domain} -d $domain --non-interactive
+# Nginx & Certificate Setup (Multi-Tier Fallback & Dual-Stack Pre-Flight)
+if [[ -f /usr/local/sbin/lib/common.sh ]]; then
+  . /usr/local/sbin/lib/common.sh
+elif [[ -n "$SCRIPT_DIR" && -f "${SCRIPT_DIR}/scripts/lib/common.sh" ]]; then
+  . "${SCRIPT_DIR}/scripts/lib/common.sh"
+fi
 
-# Verify the certificate was actually issued before continuing.
-if [[ -f /etc/letsencrypt/live/$domain/fullchain.pem && -f /etc/letsencrypt/live/$domain/privkey.pem ]]; then
-  cp /etc/letsencrypt/live/$domain/fullchain.pem /etc/xray/xray.crt
-  cp /etc/letsencrypt/live/$domain/privkey.pem /etc/xray/xray.key
+if command -v obtain_ssl_certificates &>/dev/null; then
+  obtain_ssl_certificates "$domain"
+else
+  print_warn "obtain_ssl_certificates helper unavailable; using emergency self-signed ECDSA certificate."
+  mkdir -p /etc/xray /etc/haproxy
+  openssl ecparam -name prime256v1 -genkey -noout -out /etc/xray/xray.key 2>/dev/null
+  openssl req -new -x509 -key /etc/xray/xray.key -out /etc/xray/xray.crt -days 365 \
+    -subj "/C=ID/ST=Jakarta/L=Jakarta/O=Antigravity VPN/CN=${domain}" >/dev/null 2>&1
   chmod 644 /etc/xray/xray.crt
   chmod 600 /etc/xray/xray.key
-  print_success "Certificates issued."
-else
-  print_error "Certificate issuance failed for ${domain}."
-  print_error "Check that the domain points to this server's IP and port 80 is reachable."
-  print_warn "Aborting installation. Re-run after fixing DNS/port 80."
-  exit 1
+  cat /etc/xray/xray.crt /etc/xray/xray.key > /etc/haproxy/haproxy.pem
+  chmod 600 /etc/haproxy/haproxy.pem
 fi
 
 # Setup Nginx
@@ -1902,6 +1917,15 @@ haproxy_install_logic() {
   cat /etc/xray/xray.crt /etc/xray/xray.key | tee /etc/haproxy/haproxy.pem >/dev/null
   chmod 600 /etc/haproxy/haproxy.pem
 
+  # Detect IPv6 socket capability for Dual-Stack listeners
+  local haproxy_v6_http=""
+  local haproxy_v6_tls=""
+  if [[ -f /proc/net/if_inet6 ]] && python3 -c "import socket; s=socket.socket(socket.AF_INET6, socket.SOCK_STREAM); s.close()" 2>/dev/null; then
+    print_info "IPv6 capability detected: enabling Dual-Stack IPv4 & IPv6 listeners in HAProxy."
+    haproxy_v6_http=$'\n    bind :::80 v6only\n    bind :::8080 v6only'
+    haproxy_v6_tls=$'\n    bind :::443 v6only ssl crt /etc/haproxy/haproxy.pem alpn h2,http/1.1\n    bind :::8443 v6only ssl crt /etc/haproxy/haproxy.pem alpn h2,http/1.1'
+  fi
+
   cat >/etc/haproxy/haproxy.cfg <<EOF
 global
     log /dev/log local0
@@ -1923,7 +1947,7 @@ defaults
 # Plain HTTP on :80 and :8080 -> nginx (WS/HU/XHTTP over HTTP, ACME, downloads, API).
 frontend http_in
     bind *:80
-    bind *:8080
+    bind *:8080${haproxy_v6_http}
     mode tcp
     default_backend nginx_http
 
@@ -1934,7 +1958,7 @@ frontend http_in
 #   * anything else (raw SSH)     -> Dropbear directly (:109) (Direct SSH SSL/TLS)
 frontend tls_in
     bind *:443 ssl crt /etc/haproxy/haproxy.pem alpn h2,http/1.1
-    bind *:8443 ssl crt /etc/haproxy/haproxy.pem alpn h2,http/1.1
+    bind *:8443 ssl crt /etc/haproxy/haproxy.pem alpn h2,http/1.1${haproxy_v6_tls}
     mode tcp
     tcp-request inspect-delay 5s
     acl is_h2 ssl_fc_alpn -i h2

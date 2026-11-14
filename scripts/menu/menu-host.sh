@@ -11,78 +11,27 @@ green='\033[0;92m'
 red='\033[0;91m'
 yellow='\033[0;93m'
 
-function install_acme() {
-    if [ ! -f ~/.acme.sh/acme.sh ]; then
-        echo -e "[ ${yellow}INFO${NC} ] acme.sh not found, installing..."
-        curl https://get.acme.sh | sh
-        export PATH=~/.acme.sh:$PATH
-    fi
-
-    random_prefix=$(tr -dc a-z </dev/urandom | head -c5)
-    random_number=$(shuf -i 1000-9999 -n 1)
-    acme_email="${random_prefix}${random_number}@risqinf.biz.id"
-
-    if [ ! -f ~/.acme.sh/account.conf ]; then
-        echo -e "[ ${green}INFO${NC} ] Registering new account with email: $acme_email"
-        ~/.acme.sh/acme.sh --register-account -m "$acme_email" --agree-tos > /dev/null 2>&1
-    else
-        echo -e "[ ${green}INFO${NC} ] ACME account already exists. Using existing."
-    fi
-}
-
 cert() {
     clear
-    install_acme
-
-    echo -e "[ ${green}INFO${NC} ] Start "
-    sleep 0.5
-    systemctl stop nginx haproxy
-
-    domain=$(cat /etc/xray/domain)
-    rm -f /etc/xray/xray.crt /etc/xray/xray.key
-
-    sleep 1
-    echo -e "[ ${red}WARNING${NC} ] Detected port 80 used by Nginx/HAProxy "
-    sleep 2
-    echo -e "[ ${green}INFO${NC} ] Processing to stop Nginx and HAProxy "
-    sleep 1
-
-    clear
-    echo -e "[ ${green}INFO${NC} ] Starting renew cert... "
-    sleep 2
-    clear
-
-    ~/.acme.sh/acme.sh --set-default-ca --server letsencrypt
-    ~/.acme.sh/acme.sh --issue -d "$domain" --standalone -k ec-256
-    ~/.acme.sh/acme.sh --installcert -d "$domain" \
-        --fullchainpath /etc/xray/xray.crt \
-        --keypath /etc/xray/xray.key \
-        --ecc
-        
-    # Update HAProxy combined certificate
-    cat /etc/xray/xray.crt /etc/xray/xray.key | tee /etc/haproxy/haproxy.pem > /dev/null
-    chmod 600 /etc/xray/xray.key /etc/haproxy/haproxy.pem 2>/dev/null
-
-    # Update NoobzVPN certificate
-    if [[ -d /etc/noobzvpns ]]; then
-        cp -f /etc/xray/xray.crt /etc/noobzvpns/cert.pem
-        cp -f /etc/xray/xray.key /etc/noobzvpns/key.pem
-        chmod 600 /etc/noobzvpns/key.pem /etc/noobzvpns/cert.pem 2>/dev/null || true
+    local domain
+    domain=$(cat /etc/xray/domain 2>/dev/null || echo "")
+    if [[ -z "$domain" ]]; then
+        err "No domain configured in /etc/xray/domain."
+        read -n 1 -s -r -p "Press any key to return..."
+        menu
+        return
     fi
 
-    sleep 2
-    clear
-    echo -e "[ ${green}INFO${NC} ] Renew cert done... "
-    sleep 2
-    clear
-    echo -e "[ ${green}INFO${NC} ] Restarting services... "
-    sleep 2
-
-    systemctl restart nginx haproxy xray
-    svc_active noobzvpns && systemctl restart noobzvpns 2>/dev/null || true
+    echo -e "[ ${green}INFO${NC} ] Starting SSL certificate issuance / renewal for ${domain}..."
     sleep 0.5
-    clear
-    echo -e "[ ${green}INFO${NC} ] All finished... "
+
+    obtain_ssl_certificates "$domain"
+
+    echo -e "[ ${green}INFO${NC} ] Restarting services..."
+    systemctl restart nginx haproxy xray 2>/dev/null || true
+    svc_active noobzvpns && systemctl restart noobzvpns 2>/dev/null || true
+
+    echo -e "[ ${green}INFO${NC} ] Process finished."
     echo ""
     read -n 1 -s -r -p "Press any key to back on menu"
     menu

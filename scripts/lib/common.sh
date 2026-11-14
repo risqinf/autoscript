@@ -243,6 +243,241 @@ get_ip() {
   fi
 }
 
+# --- SSL Certificate Engine (Multi-Tier Fallback & Dual-Stack Pre-Flight) ---
+# Tiers:
+#   Tier 1: acme.sh (Let's Encrypt CA, ECC ec-256, standalone port 80, dual-stack --listen-v6)
+#   Tier 2: certbot (if available without package conflict)
+#   Tier 3: acme.sh (ZeroSSL CA fallback)
+#   Tier 4: Emergency Self-Signed ECDSA (guarantees services start without crashing installer)
+obtain_ssl_certificates() {
+  local domain="$1"
+  if [[ -z "$domain" ]]; then
+    domain=$(cat /etc/xray/domain 2>/dev/null || echo "")
+  fi
+  if [[ -z "$domain" ]]; then
+    if command -v print_error &>/dev/null; then print_error "Domain name is required for certificate issuance."; else echo -e "\033[0;31m[ERROR]\033[0m Domain name is required for certificate issuance."; fi
+    return 1
+  fi
+
+  # Helper logging bridges
+  local log_ok log_info log_warn log_err
+  log_ok()   { if command -v print_success &>/dev/null; then print_success "$1"; elif command -v ok &>/dev/null; then ok "$1"; else echo -e "\033[0;32m[OK]\033[0m $1"; fi; }
+  log_info() { if command -v print_info &>/dev/null; then print_info "$1"; elif command -v info &>/dev/null; then info "$1"; else echo -e "\033[0;34m[INFO]\033[0m $1"; fi; }
+  log_warn() { if command -v print_warn &>/dev/null; then print_warn "$1"; elif command -v warn &>/dev/null; then warn "$1"; else echo -e "\033[0;33m[WARN]\033[0m $1"; fi; }
+  log_err()  { if command -v print_error &>/dev/null; then print_error "$1"; elif command -v err &>/dev/null; then err "$1"; else echo -e "\033[0;31m[ERROR]\033[0m $1"; fi; }
+
+  log_info "Initiating SSL certificate issuance for: ${domain}"
+
+  mkdir -p /etc/xray /etc/haproxy
+  echo "$domain" > /etc/xray/domain
+
+  # 1. Stop web services to free up port 80 for standalone ACME challenges
+  systemctl stop nginx haproxy httpd apache2 >/dev/null 2>&1 || true
+  if command -v fuser &>/dev/null; then
+    fuser -k 80/tcp >/dev/null 2>&1 || true
+  fi
+
+  # 2. Dual-Stack Pre-Flight Check (IPv4 & IPv6)
+  local dns_v4_list=""
+  local dns_v6_list=""
+  local has_v6_kernel=0
+  local v6_match=0
+  local acme_v6_flag=""
+
+  if [[ -f /proc/net/if_inet6 ]] && python3 -c "import socket; s=socket.socket(socket.AF_INET6, socket.SOCK_STREAM); s.close()" 2>/dev/null; then
+    has_v6_kernel=1
+  fi
+
+  if command -v python3 &>/dev/null; then
+    local dns_res
+    dns_res=$(python3 -c "import socket, sys, ipaddress
+domain = sys.argv[1].strip()
+v4 = []
+v6 = []
+try:
+    v4 = sorted(list(set([r[4][0] for r in socket.getaddrinfo(domain, 80, socket.AF_INET)])))
+except Exception:
+    pass
+try:
+    v6 = sorted(list(set([r[4][0] for r in socket.getaddrinfo(domain, 80, socket.AF_INET6)])))
+except Exception:
+    pass
+
+v6_matched = False
+try:
+    with open('/proc/net/if_inet6', 'r') as f:
+        lines = f.readlines()
+    local_v6_hex = [l.split()[0] for l in lines]
+    local_v6_objs = []
+    for h in local_v6_hex:
+        chunked = ':'.join([h[i:i+4] for i in range(0, 32, 4)])
+        try:
+            local_v6_objs.append(ipaddress.ip_address(chunked))
+        except Exception:
+            pass
+    for d6 in v6:
+        d6_obj = ipaddress.ip_address(d6)
+        if d6_obj in local_v6_objs:
+            v6_matched = True
+            break
+except Exception:
+    pass
+
+print(' '.join(v4))
+print(' '.join(v6))
+print(1 if v6_matched else 0)
+" "$domain" 2>/dev/null || true)
+
+    dns_v4_list=$(echo "$dns_res" | sed -n '1p')
+    dns_v6_list=$(echo "$dns_res" | sed -n '2p')
+    v6_match=$(echo "$dns_res" | sed -n '3p')
+  fi
+
+  log_info "Pre-Flight DNS A (IPv4): ${dns_v4_list:-none}"
+  if [[ -n "$dns_v6_list" ]]; then
+    log_info "Pre-Flight DNS AAAA (IPv6): ${dns_v6_list}"
+    if [[ "$has_v6_kernel" -eq 1 ]]; then
+      acme_v6_flag="--listen-v6"
+      if [[ "$v6_match" == "1" ]]; then
+        log_ok "Dual-Stack verified: Domain IPv6 points directly to this host."
+      else
+        log_warn "Dual-Stack notice: Domain has AAAA record ($dns_v6_list) but no exact local interface match."
+        log_warn "Let's Encrypt CAs prioritize IPv6. If IPv6 port 80 is not routed to this host, ACME will fail."
+      fi
+    else
+      log_warn "Domain has AAAA record ($dns_v6_list) but kernel IPv6 is disabled/unavailable."
+      log_warn "ACME validation may fail if the CA attempts IPv6-first connection."
+    fi
+  fi
+
+  # 3. Ensure lightweight acme.sh dependencies are present
+  dnf install -y socat lsof --skip-broken >/dev/null 2>&1 || true
+  systemctl enable crond --now >/dev/null 2>&1 || true
+
+  local acme_bin=""
+  if [[ -x /root/.acme.sh/acme.sh ]]; then
+    acme_bin="/root/.acme.sh/acme.sh"
+  elif [[ -x "$HOME/.acme.sh/acme.sh" ]]; then
+    acme_bin="$HOME/.acme.sh/acme.sh"
+  elif command -v acme.sh &>/dev/null; then
+    acme_bin="$(command -v acme.sh)"
+  fi
+
+  if [[ -z "$acme_bin" ]]; then
+    log_info "Installing standalone acme.sh client..."
+    local rand_mail="admin-$(head -c 4 /dev/urandom | od -An -tu2 | tr -d ' ' 2>/dev/null || echo $$)@${domain}"
+    if curl -sSL https://get.acme.sh 2>/dev/null | sh -s email="$rand_mail" >/dev/null 2>&1; then
+      :
+    elif wget -qO- https://get.acme.sh 2>/dev/null | sh -s email="$rand_mail" >/dev/null 2>&1; then
+      :
+    fi
+    if [[ -x /root/.acme.sh/acme.sh ]]; then
+      acme_bin="/root/.acme.sh/acme.sh"
+    elif [[ -x "$HOME/.acme.sh/acme.sh" ]]; then
+      acme_bin="$HOME/.acme.sh/acme.sh"
+    fi
+  fi
+
+  local cert_issued=0
+
+  # Tier 1: acme.sh Let's Encrypt CA
+  if [[ -n "$acme_bin" && -x "$acme_bin" ]]; then
+    log_info "[Tier 1] Requesting Let's Encrypt ECC certificate via acme.sh..."
+    "$acme_bin" --register-account -m "admin@${domain}" --agree-tos >/dev/null 2>&1 || true
+    "$acme_bin" --set-default-ca --server letsencrypt >/dev/null 2>&1 || true
+    
+    local issue_cmd=("$acme_bin" --issue -d "$domain" --standalone)
+    [[ -n "$acme_v6_flag" ]] && issue_cmd+=("$acme_v6_flag")
+    issue_cmd+=(-k ec-256 --force)
+
+    if "${issue_cmd[@]}" >/tmp/acme_tier1.log 2>&1; then
+      if "$acme_bin" --installcert -d "$domain" --fullchainpath /etc/xray/xray.crt --keypath /etc/xray/xray.key --ecc >/dev/null 2>&1; then
+        if [[ -s /etc/xray/xray.crt && -s /etc/xray/xray.key ]]; then
+          cert_issued=1
+          log_ok "Certificate successfully issued via acme.sh (Let's Encrypt)."
+        fi
+      fi
+    elif [[ -n "$acme_v6_flag" ]]; then
+      # Retry without --listen-v6 if dual-stack standalone listener had a bind issue
+      if "$acme_bin" --issue -d "$domain" --standalone -k ec-256 --force >>/tmp/acme_tier1.log 2>&1; then
+        if "$acme_bin" --installcert -d "$domain" --fullchainpath /etc/xray/xray.crt --keypath /etc/xray/xray.key --ecc >/dev/null 2>&1; then
+          if [[ -s /etc/xray/xray.crt && -s /etc/xray/xray.key ]]; then
+            cert_issued=1
+            log_ok "Certificate successfully issued via acme.sh (Let's Encrypt, IPv4 mode)."
+          fi
+        fi
+      fi
+    fi
+  fi
+
+  # Tier 2: certbot (if installed or cleanly installable without DNF conflicts)
+  if [[ "$cert_issued" -eq 0 ]]; then
+    log_info "[Tier 2] Checking certbot standalone fallback..."
+    if ! command -v certbot &>/dev/null; then
+      dnf install -y certbot --skip-broken >/dev/null 2>&1 || true
+    fi
+    if command -v certbot &>/dev/null; then
+      log_info "[Tier 2] Requesting certificate via certbot..."
+      if certbot certonly --standalone --preferred-challenges http --agree-tos --email "admin@${domain}" -d "$domain" --non-interactive >/tmp/certbot_tier2.log 2>&1; then
+        if [[ -f "/etc/letsencrypt/live/$domain/fullchain.pem" && -f "/etc/letsencrypt/live/$domain/privkey.pem" ]]; then
+          cp -f "/etc/letsencrypt/live/$domain/fullchain.pem" /etc/xray/xray.crt
+          cp -f "/etc/letsencrypt/live/$domain/privkey.pem" /etc/xray/xray.key
+          cert_issued=1
+          log_ok "Certificate successfully issued via certbot."
+        fi
+      fi
+    fi
+  fi
+
+  # Tier 3: acme.sh ZeroSSL CA fallback
+  if [[ "$cert_issued" -eq 0 && -n "$acme_bin" && -x "$acme_bin" ]]; then
+    log_info "[Tier 3] Requesting ECC certificate via acme.sh (ZeroSSL CA fallback)..."
+    "$acme_bin" --set-default-ca --server zerossl >/dev/null 2>&1 || true
+    if "$acme_bin" --issue -d "$domain" --standalone -k ec-256 --force >/tmp/acme_tier3.log 2>&1; then
+      if "$acme_bin" --installcert -d "$domain" --fullchainpath /etc/xray/xray.crt --keypath /etc/xray/xray.key --ecc >/dev/null 2>&1; then
+        if [[ -s /etc/xray/xray.crt && -s /etc/xray/xray.key ]]; then
+          cert_issued=1
+          log_ok "Certificate successfully issued via acme.sh (ZeroSSL)."
+        fi
+      fi
+    fi
+  fi
+
+  # Tier 4: Emergency Self-Signed ECDSA certificate
+  if [[ "$cert_issued" -eq 0 ]]; then
+    log_warn "[Tier 4] Automated ACME validation failed for ${domain}."
+    log_warn "Likely causes: DNS propagation delay or port 80 is blocked by cloud provider/firewall."
+    log_info "Generating emergency self-signed ECDSA certificate to ensure all services start without crashing..."
+
+    openssl ecparam -name prime256v1 -genkey -noout -out /etc/xray/xray.key 2>/dev/null
+    openssl req -new -x509 -key /etc/xray/xray.key -out /etc/xray/xray.crt -days 365 \
+      -subj "/C=ID/ST=Jakarta/L=Jakarta/O=Antigravity VPN/CN=${domain}" >/dev/null 2>&1
+
+    if [[ -s /etc/xray/xray.crt && -s /etc/xray/xray.key ]]; then
+      log_ok "Emergency self-signed ECDSA certificate generated successfully."
+      log_warn "NOTE: When DNS is ready and port 80 is accessible, renew certificate anytime via:"
+      log_warn "  menu -> Domain & Certificate -> Renew Certificate"
+    else
+      log_err "Failed to generate emergency SSL certificate. OpenSSL is required."
+      return 1
+    fi
+  fi
+
+  # Synchronize certificates and bundle for HAProxy & NoobzVPN
+  chmod 644 /etc/xray/xray.crt
+  chmod 600 /etc/xray/xray.key
+  cat /etc/xray/xray.crt /etc/xray/xray.key > /etc/haproxy/haproxy.pem
+  chmod 600 /etc/haproxy/haproxy.pem
+
+  if [[ -d /etc/noobzvpns ]]; then
+    cp -f /etc/xray/xray.crt /etc/noobzvpns/cert.pem
+    cp -f /etc/xray/xray.key /etc/noobzvpns/key.pem
+    chmod 600 /etc/noobzvpns/key.pem /etc/noobzvpns/cert.pem 2>/dev/null || true
+  fi
+
+  return 0
+}
+
 # --- Validation (strict allowlists) ---
 valid_username() { [[ "$1" =~ ^[a-zA-Z0-9_]{3,32}$ ]]; }
 valid_prefix()   { [[ "$1" =~ ^[a-zA-Z0-9_]{1,16}$ ]]; }
