@@ -53,6 +53,7 @@ fi
 
 db_set_expired "ssh" "$user" "$new_epoch"
 db_audit "recover" "ssh" "$user" "+${days}d"
+tg_send "<b>━━━━━━━━━━━━━━━━━━━━━━━━━━━</b>%0A<b>    ⊹ SSH UNBANNED / RECOVERED ⊹</b>%0A<b>━━━━━━━━━━━━━━━━━━━━━━━━━━━</b>%0A<b>Username :</b> <code>${user}</code>%0A<b>Protocol :</b> <code>SSH</code>%0A<b>Status   :</b> <b>ACTIVE (Dipulihkan)</b>%0A<b>Action   :</b> <code>Dipulihkan via CLI</code>%0A<b>━━━━━━━━━━━━━━━━━━━━━━━━━━━</b>"
 ok "Recovered '$user' (expires in ${days} days)."
 line
 read -n 1 -s -r -p "Press any key to menu..."

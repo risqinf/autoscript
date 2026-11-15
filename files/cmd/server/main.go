@@ -23,8 +23,8 @@ import (
 	_ "modernc.org/sqlite"
 )
 
-// Version is injected at build time via -ldflags "-X main.Version=v5.6.1".
-var Version = "v5.6.1"
+// Version is injected at build time via -ldflags "-X main.Version=v5.6.3".
+var Version = "v5.6.3"
 
 func main() {
 	showVersion := flag.Bool("version", false, "Print version and exit")
@@ -99,9 +99,16 @@ func main() {
 	val := validator.New()
 
 	// Services
+	tgNotifier := service.NewTelegramNotifier(&logger)
 	xraySvc := service.NewXrayService(cfg, &logger)
 	accountSvc := service.NewAccountServiceFull(accountRepo, apiRepo, xraySvc, snapCache, cfg, &logger)
+	accountSvc.SetTelegramNotifier(tgNotifier)
 	monitorSvc := service.NewMonitorServiceWithCache(accountRepo, cfg, snapCache, &logger)
+
+	// 15-Minute Auto-Unban Evaluation Worker
+	autoUnbanSvc := service.NewAutoUnbanService(accountRepo, accountSvc, tgNotifier, &logger)
+	autoUnbanSvc.Start()
+	defer autoUnbanSvc.Stop()
 
 	// Handlers
 	accountHdlr := handler.NewAccountHandlerWithConfig(accountSvc, xraySvc, val, cfg, &logger)

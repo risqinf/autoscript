@@ -3,6 +3,26 @@
 All notable changes to this project are documented here.
 This project adheres to [Semantic Versioning](https://semver.org/).
 
+## [5.6.3] - 2026-11-15
+
+Enterprise Real-time Telegram Notifications, 15-Minute Auto-Unban Engine, and High-Concurrency Burst Hardening: **Release 5.6.3**.
+
+### Added
+- **Real-Time Telegram Notification Engine (`service.TelegramNotifier`)**:
+  - Full automated lifecycle notifications sent to configured Telegram bot and admin chat:
+    - **Account Created**: protocol, username, quota, limit IP, expiry timestamp, and creator (CLI, Flash-Sale Bulk, or API).
+    - **Account Deleted**: immediate notification upon deletion via CLI or API.
+    - **Account Suspended / Banned**: alerts with clear contextual reason descriptions (Multi-Device IP Limit exceeded, Bandwidth Quota exhausted, or expired).
+    - **Account Unbanned / Recovered**: alerts when accounts are restored manually or automatically.
+- **Automated 15-Minute Auto-Unban Worker (`service.AutoUnbanService` & `scripts/system/autounban.sh`)**:
+  - Automatically evaluates accounts in `suspended` status.
+  - Automatically unbans and restores configurations across Xray (VLESS, VMESS, Trojan), Linux shadow/Dropbear (SSH), and NoobzVPN once the 15-minute cooldown elapsed.
+  - Automatically resets quota counters for quota-suspended accounts.
+  - Dispatches rich Telegram notification highlighting auto-recovery completion.
+- **High-Concurrency Burst & Bulk Creation Engine**:
+  - Zero-downtime batch provisioning supporting high concurrent order volumes from API without dropped requests or database locks.
+  - Integrated WAL-mode SQLite pool coordination and atomic single-pass mutators.
+
 ## [5.6.2] - 2026-11-08
 
 RDNS Integration Hardening, Active Detection & Diagnostics Engine, Collision-Free Interceptor Ports, and 1-Click Preset Setup: **Release 5.6.2**.

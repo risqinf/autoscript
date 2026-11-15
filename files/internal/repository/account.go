@@ -35,6 +35,7 @@ type AccountRepository interface {
 	List(ctx context.Context, protocol string, page, perPage int) ([]*model.Account, int, error)
 	ListFiltered(ctx context.Context, protocol, status, search string, page, perPage int) ([]*model.Account, int, error)
 	ListAllByProtocol(ctx context.Context, protocol string) ([]*model.Account, error)
+	ListAllSuspended(ctx context.Context) ([]*model.Account, error)
 	CountByProtocol(ctx context.Context, protocol string) (int, error)
 	SummaryByProtocol(ctx context.Context) ([]model.ProtocolSummary, error)
 
@@ -676,6 +677,39 @@ func (r *accountRepository) ListAllByProtocol(ctx context.Context, protocol stri
 		WHERE protocol = ? AND status != 'deleted'
 		ORDER BY username
 	`, protocol)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	accounts := make([]*model.Account, 0)
+	for rows.Next() {
+		var account model.Account
+		var expiredAt, createdAt, updatedAt int64
+		if err := rows.Scan(
+			&account.ID, &account.Protocol, &account.Username, &account.Secret,
+			&account.QuotaBytes, &account.UsedBytes, &account.LimitIP,
+			&expiredAt, &account.Status, &createdAt, &updatedAt, &account.Note,
+		); err != nil {
+			return nil, err
+		}
+		account.ExpiredAt = time.Unix(expiredAt, 0)
+		account.CreatedAt = time.Unix(createdAt, 0)
+		account.UpdatedAt = time.Unix(updatedAt, 0)
+		accounts = append(accounts, &account)
+	}
+	return accounts, nil
+}
+
+// ListAllSuspended returns all accounts currently marked as suspended across all protocols.
+func (r *accountRepository) ListAllSuspended(ctx context.Context) ([]*model.Account, error) {
+	rows, err := r.readDB.QueryContext(ctx, `
+		SELECT id, protocol, username, secret, quota_bytes, used_bytes,
+			   limit_ip, expired_at, status, created_at, updated_at, note
+		FROM accounts
+		WHERE status = 'suspended'
+		ORDER BY updated_at ASC
+	`)
 	if err != nil {
 		return nil, err
 	}

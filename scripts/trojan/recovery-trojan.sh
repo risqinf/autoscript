@@ -47,6 +47,7 @@ if cfg_add_client "trojan" "$user" "$uuid"; then
            WHERE protocol='trojan' AND username='$(sql_escape "$user")';"
   db_audit "recover" "trojan" "$user" ""
   systemctl restart xray.service >/dev/null 2>&1
+  tg_send "<b>━━━━━━━━━━━━━━━━━━━━━━━━━━━</b>%0A<b>    ⊹ TROJAN UNBANNED / RECOVERED ⊹</b>%0A<b>━━━━━━━━━━━━━━━━━━━━━━━━━━━</b>%0A<b>Username :</b> <code>${user}</code>%0A<b>Protocol :</b> <code>TROJAN</code>%0A<b>Status   :</b> <b>ACTIVE (Dipulihkan)</b>%0A<b>Action   :</b> <code>Dipulihkan via CLI</code>%0A<b>━━━━━━━━━━━━━━━━━━━━━━━━━━━</b>"
   ok "Recovered '$user'."
 else
   err "Failed to restore into config."

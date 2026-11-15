@@ -46,6 +46,7 @@ type AccountService interface {
 	ListAccountsFiltered(ctx context.Context, protocol, status, search string, page, perPage int) ([]*model.Account, int, error)
 	GetAccountsSummary(ctx context.Context) ([]model.ProtocolSummary, error)
 	GetAuditLogs(ctx context.Context, limit int) ([]model.AuditLogEntry, error)
+	SetTelegramNotifier(notifier *TelegramNotifier)
 }
 
 // accountService implements AccountService.
@@ -60,6 +61,7 @@ type accountService struct {
 	config        *config.Config
 	logger        *zerolog.Logger
 	httpClient    *http.Client
+	notifier      *TelegramNotifier
 }
 
 // NewAccountService creates a new AccountService (backward-compatible constructor).
@@ -99,7 +101,12 @@ func NewAccountServiceFull(
 		httpClient: &http.Client{
 			Timeout: 800 * time.Millisecond,
 		},
+		notifier: NewTelegramNotifier(logger),
 	}
+}
+
+func (s *accountService) SetTelegramNotifier(n *TelegramNotifier) {
+	s.notifier = n
 }
 
 func (s *accountService) invalidateCaches() {
@@ -270,6 +277,12 @@ func (s *accountService) CreateAccount(ctx context.Context, protocol string, req
 
 	_ = s.repo.WriteAuditLog(ctx, "api", "create", protocol, account.Username, fmt.Sprintf("quota=%dB limit_ip=%d", account.QuotaBytes, account.LimitIP))
 	s.invalidateCaches()
+
+	if s.notifier != nil {
+		quotaGB := account.QuotaBytes / (1024 * 1024 * 1024)
+		s.notifier.NotifyCreate(protocol, account.Username, account.ExpiredAt.Format("2006-01-02 15:04:05"), quotaGB, account.LimitIP, "API")
+	}
+
 	return account, nil
 }
 
@@ -512,6 +525,10 @@ func (s *accountService) CreateBulkAccounts(ctx context.Context, protocol string
 	_ = s.repo.WriteAuditLog(ctx, "api", "bulk_create", protocol, fmt.Sprintf("batch(%d)", len(toPersist)),
 		fmt.Sprintf("requested=%d created=%d duration_ms=%d", len(items), len(toPersist), time.Since(start).Milliseconds()))
 	s.invalidateCaches()
+
+	if s.notifier != nil && len(toPersist) > 0 {
+		s.notifier.NotifyBulkCreate(protocol, len(toPersist), req.Prefix, "API / Bulk")
+	}
 
 	return &model.BulkCreateResult{
 		Protocol:       protocol,
@@ -757,6 +774,11 @@ func (s *accountService) DeleteAccount(ctx context.Context, protocol, username s
 
 	_ = s.repo.WriteAuditLog(ctx, "api", "delete", protocol, username, "deleted via API")
 	s.invalidateCaches()
+
+	if s.notifier != nil {
+		s.notifier.NotifyDelete(protocol, username, "API / Admin")
+	}
+
 	return nil
 }
 
@@ -950,6 +972,11 @@ func (s *accountService) SuspendAccount(ctx context.Context, protocol, username,
 	}
 	_ = s.repo.WriteAuditLog(ctx, "api", "suspend", protocol, username, reason)
 	s.invalidateCaches()
+
+	if s.notifier != nil {
+		s.notifier.NotifySuspend(protocol, username, reason)
+	}
+
 	return acc, nil
 }
 
@@ -958,7 +985,11 @@ func (s *accountService) UnsuspendAccount(ctx context.Context, protocol, usernam
 	if err := s.RecoverAccount(ctx, protocol, username); err != nil {
 		return nil, err
 	}
-	return s.repo.GetByUsername(ctx, protocol, username)
+	acc, err := s.repo.GetByUsername(ctx, protocol, username)
+	if err == nil && acc != nil && s.notifier != nil {
+		s.notifier.NotifyUnsuspend(protocol, username, "Dipulihkan via API", false)
+	}
+	return acc, err
 }
 
 // ResetAccountQuota resets used_bytes (and ssh_proto_usage) to 0 and reactivates if quota-suspended.
@@ -973,6 +1004,9 @@ func (s *accountService) ResetAccountQuota(ctx context.Context, protocol, userna
 	if acc.Status == "suspended" && !acc.IsExpired() {
 		_ = s.RecoverAccount(ctx, protocol, username)
 		acc, _ = s.repo.GetByUsername(ctx, protocol, username)
+		if s.notifier != nil {
+			s.notifier.NotifyUnsuspend(protocol, username, "Reset Quota & Diaktifkan Kembali", false)
+		}
 	}
 	_ = s.repo.WriteAuditLog(ctx, "api", "reset_quota", protocol, username, "quota reset to 0")
 	s.invalidateCaches()

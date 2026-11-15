@@ -39,6 +39,8 @@ acc_xray_create() {
   fi
   db_audit "create" "$proto" "$user" "quota=${quota_gb}GB ip=${limit_ip}"
   systemctl restart xray.service >/dev/null 2>&1
+  local exp_disp; exp_disp=$(date -d "@${exp_epoch}" +"%Y-%m-%d %H:%M:%S" 2>/dev/null || date -r "${exp_epoch}" +"%Y-%m-%d %H:%M:%S" 2>/dev/null || echo "$exp_epoch")
+  tg_send "<b>━━━━━━━━━━━━━━━━━━━━━━━━━━━</b>%0A<b>    ⊹ ${proto^^} ACCOUNT CREATED ⊹</b>%0A<b>━━━━━━━━━━━━━━━━━━━━━━━━━━━</b>%0A<b>Username :</b> <code>${user}</code>%0A<b>Protocol :</b> <code>${proto^^}</code>%0A<b>Quota    :</b> <code>$([[ $quota_gb -gt 0 ]] && echo "${quota_gb} GB" || echo "Unlimited")</code>%0A<b>Limit IP :</b> <code>$([[ $limit_ip -gt 0 ]] && echo "${limit_ip} IP" || echo "Unlimited")</code>%0A<b>Expired  :</b> <code>${exp_disp}</code>%0A<b>Creator  :</b> <code>CLI / Admin</code>%0A<b>━━━━━━━━━━━━━━━━━━━━━━━━━━━</b>"
   return 0
 }
 
@@ -50,6 +52,7 @@ acc_xray_delete() {
   db_set_status "$proto" "$user" "deleted"
   db_audit "delete" "$proto" "$user" ""
   systemctl restart xray.service >/dev/null 2>&1
+  tg_send "<b>━━━━━━━━━━━━━━━━━━━━━━━━━━━</b>%0A<b>    ⊹ ${proto^^} ACCOUNT DELETED ⊹</b>%0A<b>━━━━━━━━━━━━━━━━━━━━━━━━━━━</b>%0A<b>Username :</b> <code>${user}</code>%0A<b>Protocol :</b> <code>${proto^^}</code>%0A<b>Status   :</b> <b>DELETED</b>%0A<b>By       :</b> <code>CLI / Admin</code>%0A<b>━━━━━━━━━━━━━━━━━━━━━━━━━━━</b>"
   return 0
 }
 
@@ -61,6 +64,10 @@ acc_xray_suspend() {
   db_set_status "$proto" "$user" "suspended"
   db_audit "suspend" "$proto" "$user" "$reason"
   systemctl restart xray.service >/dev/null 2>&1
+  local rlabel="$reason"
+  [[ "$reason" == *"ip"* ]] && rlabel="Limit IP Exceeded (Multi-Device Banned)"
+  [[ "$reason" == *"quota"* ]] && rlabel="Quota Bandwidth Habis"
+  tg_send "<b>━━━━━━━━━━━━━━━━━━━━━━━━━━━</b>%0A<b>    ⚠️ ${proto^^} ACCOUNT SUSPENDED / BANNED ⚠️</b>%0A<b>━━━━━━━━━━━━━━━━━━━━━━━━━━━</b>%0A<b>Username :</b> <code>${user}</code>%0A<b>Protocol :</b> <code>${proto^^}</code>%0A<b>Status   :</b> <b>SUSPENDED / BANNED</b>%0A<b>Reason   :</b> <code>${rlabel}</code>%0A<b>Action   :</b> <i>Koneksi diputus & akun dinonaktifkan</i>%0A<b>━━━━━━━━━━━━━━━━━━━━━━━━━━━</b>"
   return 0
 }
 
@@ -111,6 +118,8 @@ acc_ssh_create() {
   fi
   db_insert_account "ssh" "$user" "$pass" "$quota_bytes" "$limit_ip" "$exp_epoch"
   db_audit "create" "ssh" "$user" "ip=${limit_ip} days=${days} quota=${quota_gb}GB"
+  local exp_disp; exp_disp=$(date -d "@${exp_epoch}" +"%Y-%m-%d %H:%M:%S" 2>/dev/null || echo "$exp_epoch")
+  tg_send "<b>━━━━━━━━━━━━━━━━━━━━━━━━━━━</b>%0A<b>    ⊹ SSH ACCOUNT CREATED ⊹</b>%0A<b>━━━━━━━━━━━━━━━━━━━━━━━━━━━</b>%0A<b>Username :</b> <code>${user}</code>%0A<b>Protocol :</b> <code>SSH</code>%0A<b>Quota    :</b> <code>$([[ -n "$quota_gb" && "$quota_gb" -gt 0 ]] && echo "${quota_gb} GB" || echo "Unlimited")</code>%0A<b>Limit IP :</b> <code>$([[ -n "$limit_ip" && "$limit_ip" -gt 0 ]] && echo "${limit_ip} IP" || echo "Unlimited")</code>%0A<b>Expired  :</b> <code>${exp_disp}</code>%0A<b>Creator  :</b> <code>CLI / Admin</code>%0A<b>━━━━━━━━━━━━━━━━━━━━━━━━━━━</b>"
   return 0
 }
 
@@ -156,6 +165,7 @@ acc_ssh_delete() {
   ) 9>"$AS_SHADOW_LOCK"
   db_set_status "ssh" "$user" "deleted"
   db_audit "delete" "ssh" "$user" ""
+  tg_send "<b>━━━━━━━━━━━━━━━━━━━━━━━━━━━</b>%0A<b>    ⊹ SSH ACCOUNT DELETED ⊹</b>%0A<b>━━━━━━━━━━━━━━━━━━━━━━━━━━━</b>%0A<b>Username :</b> <code>${user}</code>%0A<b>Protocol :</b> <code>SSH</code>%0A<b>Status   :</b> <b>DELETED</b>%0A<b>By       :</b> <code>CLI / Admin</code>%0A<b>━━━━━━━━━━━━━━━━━━━━━━━━━━━</b>"
   return 0
 }
 
@@ -172,6 +182,10 @@ acc_ssh_suspend() {
   acc_ssh_kill_user "$user"
   db_set_status "ssh" "$user" "suspended"
   db_audit "suspend" "ssh" "$user" "$reason"
+  local rlabel="$reason"
+  [[ "$reason" == *"ip"* ]] && rlabel="Limit IP Exceeded (Multi-Device Banned)"
+  [[ "$reason" == *"quota"* ]] && rlabel="Quota Bandwidth Habis"
+  tg_send "<b>━━━━━━━━━━━━━━━━━━━━━━━━━━━</b>%0A<b>    ⚠️ SSH ACCOUNT SUSPENDED / BANNED ⚠️</b>%0A<b>━━━━━━━━━━━━━━━━━━━━━━━━━━━</b>%0A<b>Username :</b> <code>${user}</code>%0A<b>Protocol :</b> <code>SSH</code>%0A<b>Status   :</b> <b>SUSPENDED / BANNED</b>%0A<b>Reason   :</b> <code>${rlabel}</code>%0A<b>Action   :</b> <i>Koneksi diputus & akun dinonaktifkan</i>%0A<b>━━━━━━━━━━━━━━━━━━━━━━━━━━━</b>"
   return 0
 }
 
@@ -189,6 +203,7 @@ acc_ssh_unsuspend() {
   ) 9>"$AS_SHADOW_LOCK"
   db_set_status "ssh" "$user" "active"
   db_audit "unsuspend" "ssh" "$user" ""
+  tg_send "<b>━━━━━━━━━━━━━━━━━━━━━━━━━━━</b>%0A<b>    ⊹ SSH UNBANNED / RECOVERED ⊹</b>%0A<b>━━━━━━━━━━━━━━━━━━━━━━━━━━━</b>%0A<b>Username :</b> <code>${user}</code>%0A<b>Protocol :</b> <code>SSH</code>%0A<b>Status   :</b> <b>ACTIVE (Dipulihkan)</b>%0A<b>Catatan  :</b> <code>Dipulihkan via CLI</code>%0A<b>━━━━━━━━━━━━━━━━━━━━━━━━━━━</b>"
   return 0
 }
 
@@ -235,6 +250,8 @@ acc_noobz_create() {
 
   db_insert_account "noobz" "$user" "$pass" "$quota_bytes" "$limit_dev" "$exp_epoch"
   db_audit "create" "noobz" "$user" "devices=${limit_dev} days=${days} quota=${quota_gb}GB"
+  local exp_disp; exp_disp=$(date -d "@${exp_epoch}" +"%Y-%m-%d %H:%M:%S" 2>/dev/null || echo "$exp_epoch")
+  tg_send "<b>━━━━━━━━━━━━━━━━━━━━━━━━━━━</b>%0A<b>    ⊹ NOOBZVPN ACCOUNT CREATED ⊹</b>%0A<b>━━━━━━━━━━━━━━━━━━━━━━━━━━━</b>%0A<b>Username :</b> <code>${user}</code>%0A<b>Protocol :</b> <code>NOOBZVPN</code>%0A<b>Quota    :</b> <code>$([[ -n "$quota_gb" && "$quota_gb" -gt 0 ]] && echo "${quota_gb} GB" || echo "Unlimited")</code>%0A<b>Limit IP :</b> <code>$([[ -n "$limit_dev" && "$limit_dev" -gt 0 ]] && echo "${limit_dev} IP" || echo "Unlimited")</code>%0A<b>Expired  :</b> <code>${exp_disp}</code>%0A<b>Creator  :</b> <code>CLI / Admin</code>%0A<b>━━━━━━━━━━━━━━━━━━━━━━━━━━━</b>"
   return 0
 }
 
@@ -246,6 +263,7 @@ acc_noobz_delete() {
   fi
   db_set_status "noobz" "$user" "deleted"
   db_audit "delete" "noobz" "$user" ""
+  tg_send "<b>━━━━━━━━━━━━━━━━━━━━━━━━━━━</b>%0A<b>    ⊹ NOOBZVPN ACCOUNT DELETED ⊹</b>%0A<b>━━━━━━━━━━━━━━━━━━━━━━━━━━━</b>%0A<b>Username :</b> <code>${user}</code>%0A<b>Protocol :</b> <code>NOOBZVPN</code>%0A<b>Status   :</b> <b>DELETED</b>%0A<b>By       :</b> <code>CLI / Admin</code>%0A<b>━━━━━━━━━━━━━━━━━━━━━━━━━━━</b>"
   return 0
 }
 
@@ -257,6 +275,10 @@ acc_noobz_suspend() {
   fi
   db_set_status "noobz" "$user" "suspended"
   db_audit "suspend" "noobz" "$user" "$reason"
+  local rlabel="$reason"
+  [[ "$reason" == *"ip"* ]] && rlabel="Limit Device Exceeded"
+  [[ "$reason" == *"quota"* ]] && rlabel="Quota Bandwidth Habis"
+  tg_send "<b>━━━━━━━━━━━━━━━━━━━━━━━━━━━</b>%0A<b>    ⚠️ NOOBZVPN ACCOUNT SUSPENDED / BANNED ⚠️</b>%0A<b>━━━━━━━━━━━━━━━━━━━━━━━━━━━</b>%0A<b>Username :</b> <code>${user}</code>%0A<b>Protocol :</b> <code>NOOBZVPN</code>%0A<b>Status   :</b> <b>SUSPENDED / BANNED</b>%0A<b>Reason   :</b> <code>${rlabel}</code>%0A<b>Action   :</b> <i>Koneksi diputus & akun dinonaktifkan</i>%0A<b>━━━━━━━━━━━━━━━━━━━━━━━━━━━</b>"
   return 0
 }
 
@@ -308,6 +330,7 @@ acc_noobz_recover() {
   db_set_expired "noobz" "$user" "$exp_epoch"
   db_set_status "noobz" "$user" "active"
   db_audit "recover" "noobz" "$user" "+${days}d"
+  tg_send "<b>━━━━━━━━━━━━━━━━━━━━━━━━━━━</b>%0A<b>    ⊹ NOOBZVPN UNBANNED / RECOVERED ⊹</b>%0A<b>━━━━━━━━━━━━━━━━━━━━━━━━━━━</b>%0A<b>Username :</b> <code>${user}</code>%0A<b>Protocol :</b> <code>NOOBZVPN</code>%0A<b>Status   :</b> <b>ACTIVE (Dipulihkan)</b>%0A<b>Catatan  :</b> <code>Dipulihkan via CLI</code>%0A<b>━━━━━━━━━━━━━━━━━━━━━━━━━━━</b>"
   return 0
 }
 
